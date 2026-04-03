@@ -39,12 +39,15 @@ async function startServer() {
                 const rules = {};
                 info.symbols.forEach(s => {
                     const lotSize = s.filters.find(f => f.filterType === 'LOT_SIZE');
-                    if (lotSize) {
-                        rules[s.symbol] = {
-                            stepSize: parseFloat(lotSize.stepSize),
-                            minQty: parseFloat(lotSize.minQty)
-                        };
-                    }
+                    const priceFilter = s.filters.find(f => f.filterType === 'PRICE_FILTER');
+                    
+                    rules[s.symbol] = {
+                        stepSize: lotSize ? parseFloat(lotSize.stepSize) : 0.001,
+                        minQty: lotSize ? parseFloat(lotSize.minQty) : 0.001,
+                        precision: lotSize ? (lotSize.stepSize.toString().split('.')[1]?.length || 0) : 3,
+                        tickSize: priceFilter ? parseFloat(priceFilter.tickSize) : 0.0001,
+                        pricePrecision: priceFilter ? (priceFilter.tickSize.toString().split('.')[1]?.length || 0) : 4
+                    };
                 });
                 botService.setSymbolRules(rules);
                 console.log(`[Binance] Loaded rules for ${Object.keys(rules).length} symbols`);

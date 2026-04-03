@@ -1,6 +1,9 @@
 import { computeSignal } from '../utils/indicators.js';
 import * as dbService from '../db/dbService.js';
 import { callOpenRouter, getBotRecommendations } from './aiService.js';
+import { TuningService } from './tuningService.js';
+import fs from 'fs';
+import path from 'path';
 
 const TZ_OPTS = { timeZone: 'Asia/Bangkok', dateStyle: 'short', timeStyle: 'medium' };
 
@@ -11,6 +14,8 @@ export class BotService {
         this.bots = new Map();
         this.botTimers = new Map();
         this.symbolRules = {};
+        this.tuningService = new TuningService(binanceService, binanceConfig);
+        this.tickCount = 0;
         
         // Initialize from file
         const loaded = dbService.loadBots();
@@ -18,6 +23,9 @@ export class BotService {
             this.bots.set(bot.id, bot);
         });
         console.log(`[BotService] Loaded ${loaded.length} bots from database.`);
+        
+        // Auto-migrate legacy data on startup
+        this.runLegacyMigration().catch(err => console.warn('Migration error:', err.message));
     }
 
     setBinanceService(service, config) {
@@ -149,9 +157,19 @@ export class BotService {
             bot.currentCash = parseFloat(usdtAsset.availableBalance);
             bot.equity = parseFloat(usdtAsset.marginBalance);
 
-            const symbolPositions = accountInfo.positions.filter(p => p.symbol === symbol.toUpperCase());
-            bot.unrealizedPnl = symbolPositions.reduce((sum, p) => sum + parseFloat(p.unrealizedProfit || 0), 0);
-            const remotePositions = accountInfo.positions.filter(p => p.symbol === symbol.toUpperCase() && parseFloat(p.positionAmt) !== 0);
+            // Calculate Unrealized PnL from Binance positions
+            const symbolPositions = (accountInfo.positions || []).filter(p => p.symbol === symbol.toUpperCase());
+            bot.unrealizedPnl = symbolPositions.reduce((sum, p) => sum + parseFloat(p.unrealizedProfit || p.unRealizedProfit || 0), 0);
+            
+            const remotePositions = (accountInfo.positions || []).filter(p => p.symbol === symbol.toUpperCase() && parseFloat(p.positionAmt) !== 0);
+
+            // Sync stats immediately so Unrealized PnL is reflected
+            this.syncBotStats(bot);
+
+            // DIAGNOSTIC LOGGING
+            if (signal !== 'NONE') {
+                console.log(`[Diagnostic] Bot ${botId} (${symbol}) Signal: ${signal} | Current Price: ${currPrice}`);
+            }
 
             // AUTO-SYNC: If Binance has a position but our bot thinks it's empty, recover it.
             if (remotePositions.length > 0 && bot.openPositions.length === 0) {
@@ -198,33 +216,47 @@ export class BotService {
                 }
             }
 
-            // 4. Signal Logic on Candle Close
-            if (bot.lastCandle !== lastCloseTime) {
-              bot.lastCandle = lastCloseTime;
-              const signal = computeSignal(closes, strategy, bot.config);
-              bot.lastSignal = signal;
-
-              // Exit on Signal Flip
-              for (const pos of bot.openPositions) {
-                  if (signal !== 'NONE' && signal !== pos.type) {
-                      await this.closePosition(bot, pos, currPrice, 'Signal Flipped');
-                  }
-              }
-
-              // Open New Position
-              if ((signal === 'LONG' || signal === 'SHORT') && bot.openPositions.length === 0) {
-                  await this.openPosition(bot, signal, currPrice, closes);
-              }
+            // 4. Signal Logic & Dynamic Tuning
+            this.tickCount++;
+            if (this.tickCount % 50 === 0) {
+                console.log(`[AI Tuner] Triggering periodic tuning for ${symbol}...`);
+                this.tuningService.tuneBotParameters(bot).catch(e => console.error(e.message));
             }
 
-            this.syncBotStats(bot);
+            // Always compute signal for diagnostics
+            const signal = computeSignal(closes, strategy, { ...bot.config, dynamicParams: bot.config.dynamicParams });
+            bot.lastSignal = signal;
+
+            // DIAGNOSTIC LOGGING (Every tick)
+            const currentRsiLower = bot.config.dynamicParams?.rsiLower || 40;
+            if (this.tickCount % 10 === 0) {
+                console.log(`[Diagnostic] Bot ${botId} (${symbol}) Signal: ${signal} | Target RSI < ${currentRsiLower}`);
+            }
+
+            // Execution on Candle Close
+            if (bot.lastCandle !== lastCloseTime) {
+                bot.lastCandle = lastCloseTime;
+
+                // Exit on Signal Flip
+                for (const pos of bot.openPositions) {
+                    if (signal !== 'NONE' && signal !== pos.type) {
+                        await this.closePosition(bot, pos, currPrice, 'Signal Flipped');
+                    }
+                }
+
+                // Open New Position
+                if ((signal === 'LONG' || signal === 'SHORT') && bot.openPositions.length === 0) {
+                    await this.openPosition(bot, signal, currPrice);
+                }
+            }
+
             dbService.saveBots(this.bots);
         } catch (err) {
             console.error(`[Bot ${botId}] Tick error:`, err.message);
         }
     }
 
-    async openPosition(bot, signal, currPrice, closes) {
+    async openPosition(bot, signal, currPrice) {
         if (bot.config.useReflection) {
             const critique = await this.performAiReflection(bot, signal, currPrice);
             if (!critique.approved) {
@@ -233,31 +265,67 @@ export class BotService {
             }
         }
 
-        const rule = this.symbolRules[bot.config.symbol.toUpperCase()] || { stepSize: 0.001, minQty: 0.001 };
+        const rule = this.symbolRules[bot.config.symbol.toUpperCase()] || { stepSize: 0.001, minQty: 0.001, precision: 3, tickSize: 0.0001, pricePrecision: 4 };
         const posValue = bot.config.positionSizeUSDT || 100;
         const leverage = bot.config.leverage || 10;
-        let qty = (posValue * leverage) / currPrice;
+        const rawTotalQty = (posValue * leverage) / currPrice;
         
-        const steps = Math.floor(qty / rule.stepSize);
-        let fixedQty = steps * rule.stepSize;
-        if (fixedQty < rule.minQty) return;
+        // Support for AI Entry Steps (Layering)
+        let steps = bot.config.entry_steps || [{ type: 'MARKET', weightPct: 100, offsetPct: 0 }];
 
-        const precision = rule.stepSize.toString().split('.')[1]?.length || 0;
-        const finalQtyStr = fixedQty.toFixed(precision);
+        // GRID Strategy layering logic
+        if (bot.config.strategy === 'GRID' && bot.config.gridUpper && bot.config.gridLower) {
+            const layers = bot.config.gridLayers || 10;
+            const targetPrice = signal === 'LONG' ? bot.config.gridLower : bot.config.gridUpper;
+            const totalOffset = ((targetPrice - currPrice) / currPrice) * 100;
+            
+            steps = [];
+            const weightPerLayer = 100 / layers;
+            const offsetPerLayer = totalOffset / layers;
+            for (let i = 0; i < layers; i++) {
+                steps.push({
+                    type: i === 0 ? 'MARKET' : 'LIMIT',
+                    weightPct: weightPerLayer,
+                    offsetPct: offsetPerLayer * i
+                });
+            }
+            bot.config.entry_steps = steps;
+        }
 
-        await this.binanceService.placeOrder(bot.config.symbol, signal === 'LONG' ? 'BUY' : 'SELL', 'MARKET', finalQtyStr);
-        
-        // Push the new position to bot's memory
-        bot.openPositions.push({
-            id: `pos_${Date.now()}`,
-            type: signal,
-            entryPrice: currPrice,
-            entryTime: new Date().toISOString(),
-            entryReason: `Entry via ${bot.config.strategy} (${signal})`,
-            quantity: parseFloat(finalQtyStr)
-        });
+        for (const s of steps) {
+            const stepQty = Math.floor((rawTotalQty * (s.weightPct / 100)) / rule.stepSize) * rule.stepSize;
+            if (stepQty < rule.minQty) continue;
 
-        bot.lastEntryReason = `Entry via ${bot.config.strategy} (${signal})`;
+            const qtyStr = stepQty.toFixed(rule.precision || 3);
+
+            if (s.type === 'MARKET') {
+                await this.binanceService.placeOrder(bot.config.symbol, signal === 'LONG' ? 'BUY' : 'SELL', 'MARKET', qtyStr);
+                bot.openPositions.push({
+                    id: `pos_mkt_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,
+                    type: signal,
+                    entryPrice: currPrice,
+                    entryTime: new Date().toISOString(),
+                    entryReason: `${bot.config.strategy} - AI Step (Market ${s.weightPct}%)`,
+                    quantity: parseFloat(qtyStr)
+                });
+            } else {
+                // LIMIT with Tick Size Rounding
+                let rawLimitPrice = signal === 'LONG' ? currPrice * (1 + s.offsetPct/100) : currPrice * (1 - s.offsetPct/100);
+                const tickSize = rule.tickSize || 0.0001;
+                const pricePrecision = rule.pricePrecision || 4;
+                const roundedLimitPrice = Number((Math.round(rawLimitPrice / tickSize) * tickSize).toFixed(pricePrecision));
+                const limitPriceStr = roundedLimitPrice.toFixed(pricePrecision);
+
+                try {
+                    await this.binanceService.placeOrder(bot.config.symbol, signal === 'LONG' ? 'BUY' : 'SELL', 'LIMIT', qtyStr, limitPriceStr);
+                    console.log(`[Bot ${bot.id}] AI Step (Limit ${s.weightPct}%) Placed at ${limitPriceStr}`);
+                } catch (e) {
+                    console.error(`[Bot ${bot.id}] AI Limit Step Error:`, e.message);
+                }
+            }
+        }
+
+        bot.lastEntryReason = `AI/Grid Entry initialized (${steps.length} steps)`;
     }
 
     async closePosition(bot, pos, currPrice, reason) {
@@ -357,5 +425,53 @@ export class BotService {
     async performAiReflection(bot, signal, currPrice) {
         // Implementation of AI trade validation logic
         return { approved: true, reason: 'Auto-approved' };
+    }
+
+    async runLegacyMigration() {
+        try {
+            const root = process.cwd();
+            const legacyPath = require('path').join(root, 'forward-bots-db.json');
+            
+            if (fs.existsSync(legacyPath)) {
+                console.log('🔍 AUTO-MIGRATION: Legacy backup found! Starting data recovery...');
+                const legacyBots = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+                const currentBots = dbService.loadBots();
+                let migratedCount = 0;
+
+                for (const legacy of legacyBots) {
+                    const existing = currentBots.find(b => b.id === legacy.id);
+                    if (existing) {
+                        // Merge Trades and History
+                        const legacyTrades = legacy.trades || [];
+                        const currentTrades = existing.trades || [];
+                        
+                        // Merge and avoid basic duplicates based on time
+                        const allTrades = [...legacyTrades];
+                        currentTrades.forEach(ct => {
+                            if (!allTrades.find(lt => lt.exitTime === ct.exitTime)) {
+                                allTrades.push(ct);
+                            }
+                        });
+
+                        existing.trades = allTrades;
+                        existing.aiHistory = legacy.aiHistory || existing.aiHistory || [];
+                        existing.reflectionHistory = legacy.reflectionHistory || existing.reflectionHistory || [];
+                        existing.netPnl = legacy.netPnl || existing.netPnl || 0;
+                        existing.totalTrades = allTrades.length;
+
+                        dbService.sqlite.saveBot(existing);
+                        migratedCount++;
+                    }
+                }
+                
+                if (migratedCount > 0) {
+                    console.log(`✅ AUTO-MIGRATION COMPLETE: Restored history for ${migratedCount} bots.`);
+                    // Optionally rename it so we don't re-run every time
+                    // fs.renameSync(legacyPath, legacyPath + '.migrated');
+                }
+            }
+        } catch (e) {
+            console.warn('⚠️ Auto-Migration Error:', e.message);
+        }
     }
 }

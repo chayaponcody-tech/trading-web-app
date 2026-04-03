@@ -857,5 +857,29 @@
     "exitPrice": 2134.57,
     "exitTime": "2026-04-01T15:57:47.385Z",
     "recordedAt": "2026-04-01T15:57:47.385Z"
+  },
+  {
+    "type": "SHORT",
+    "symbol": "ETHUSDT",
+    "entryPrice": 2134.57,
+    "exitPrice": 2146.5,
+    "pnl": -8.327139999999885,
+    "reason": "SL Hit (-0.56%)",
+    "exitTime": "2026-04-01T16:50:51.264Z",
+    "entryReason": "Auto-Recovered from Binance",
+    "strategy": "AI_SCOUTER",
+    "recordedAt": "2026-04-01T16:50:51.267Z"
+  },
+  {
+    "type": "SHORT",
+    "symbol": "ETHUSDT",
+    "entryPrice": 2135.89,
+    "exitPrice": 2146.86,
+    "pnl": -15.358000000000356,
+    "reason": "SL Hit (-0.51%)",
+    "exitTime": "2026-04-01T16:50:51.270Z",
+    "entryReason": "Auto-Recovered from Binance",
+    "strategy": "AI_GRID",
+    "recordedAt": "2026-04-01T16:50:51.270Z"
   }
 ]

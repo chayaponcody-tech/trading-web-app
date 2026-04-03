@@ -1,0 +1,9 @@
+{
+  "name": "@trading/shared",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "config.js",
+  "exports": {
+    ".": "./config.js"
+  }
+}

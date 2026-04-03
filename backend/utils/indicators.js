@@ -64,11 +64,13 @@ export function computeSignal(closes, strategy, options = {}) {
     if (pPrice >= pB.upper && curr < cB.upper) return 'SHORT';
   } 
   else if (strategy === 'RSI') {
-    const rsi = RSI.calculate({ period: 14, values: closes });
+    const rsi = RSI.calculate({ period: options.dynamicParams?.rsiPeriod || 14, values: closes });
     if (rsi.length < 2) return 'NONE';
     const pR = rsi[rsi.length - 2], cR = rsi[rsi.length - 1];
-    if (pR <= 30 && cR > 30) return 'LONG';
-    if (pR >= 70 && cR < 70) return 'SHORT';
+    const rsiLower = options.dynamicParams?.rsiLower || 30;
+    const rsiUpper = options.dynamicParams?.rsiUpper || 70;
+    if (pR <= rsiLower && cR > rsiLower) return 'LONG';
+    if (pR >= rsiUpper && cR < rsiUpper) return 'SHORT';
   } 
   else if (strategy === 'EMA_RSI' || strategy === 'BB_RSI' || strategy === 'EMA_BB_RSI') {
     const e20 = EMA.calculate({ period: 20, values: closes });
@@ -85,8 +87,12 @@ export function computeSignal(closes, strategy, options = {}) {
       if (e20.length < 2 || e50.length < 2) return 'NONE';
       const crossUp = e20[e20.length-2] <= e50[e50.length-2] && e20[e20.length-1] > e50[e50.length-1];
       const crossDown = e20[e20.length-2] >= e50[e50.length-2] && e20[e20.length-1] < e50[e50.length-1];
-      if (crossUp && currRsi < 40) return 'LONG';
-      if (crossDown && currRsi > 60) return 'SHORT';
+      
+      const rsiLong = options.dynamicParams?.rsiLower || 40;
+      const rsiShort = options.dynamicParams?.rsiUpper || 60;
+      
+      if (crossUp && currRsi < rsiLong) return 'LONG';
+      if (crossDown && currRsi > rsiShort) return 'SHORT';
     } 
     else if (strategy === 'BB_RSI') {
       if (bb.length < 2) return 'NONE';

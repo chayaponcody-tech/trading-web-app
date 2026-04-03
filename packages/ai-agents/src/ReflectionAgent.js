@@ -1,0 +1,39 @@
+import { callOpenRouter } from './OpenRouterClient.js';
+
+// ─── Reflection Agent ─────────────────────────────────────────────────────────
+// Pre-trade validation: approves or rejects a signal before execution.
+// Consolidates: performAiReflection() from server.js (line 472) and botService.js.
+
+/**
+ * @param {object} bot - Bot state object
+ * @param {'LONG'|'SHORT'} signal
+ * @param {number} currPrice
+ * @param {string} apiKey
+ * @param {string} model
+ * @returns {Promise<{approved: boolean, reason: string}>}
+ */
+export async function reflect(bot, signal, currPrice, apiKey, model) {
+  if (!apiKey) return { approved: true, reason: 'No API key — auto-approved' };
+
+  const { symbol, strategy, interval } = bot.config;
+  const prompt = `You are a strict Quant Reflection Agent.
+A technical indicator fired a [${signal}] signal for ${symbol} on ${interval} timeframe using ${strategy}.
+Current price: ${currPrice}.
+
+Based on market context (volatility, trend, chop), should we execute this ${signal} trade?
+Approve only for high-probability setups. Reject for false breakouts or choppy markets.
+
+RESPONSE FORMAT (JSON only):
+{
+  "approved": true,
+  "reason": "สรุปเหตุผลสั้นๆ เป็นภาษาไทย"
+}`;
+
+  try {
+    const raw = await callOpenRouter(prompt, apiKey, model);
+    return { approved: Boolean(raw.approved), reason: raw.reason || 'No reason' };
+  } catch (e) {
+    console.error('[ReflectionAgent] Error:', e.message);
+    return { approved: true, reason: `Error — auto-approved: ${e.message}` };
+  }
+}

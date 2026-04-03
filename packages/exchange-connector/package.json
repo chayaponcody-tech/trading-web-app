@@ -1,0 +1,10 @@
+{
+  "name": "@trading/exchange-connector",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/BinanceAdapter.js",
+  "exports": {
+    ".": "./src/BinanceAdapter.js",
+    "./base": "./src/BaseExchange.js"
+  }
+}

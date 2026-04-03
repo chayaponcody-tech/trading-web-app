@@ -1,14 +1,12 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Settings, Terminal, FlaskConical, Bot, PieChart } from 'lucide-react';
+import { Settings, Terminal, FlaskConical, Bot } from 'lucide-react';
 import './App.css';
 
 function Sidebar() {
   const location = useLocation();
   const cryptoItems = [
-    { path: '/', name: 'Dashboard', icon: <LayoutDashboard size={20} /> },
-    { path: '/portfolio', name: 'Portfolio (พอร์ต)', icon: <PieChart size={20} /> },
-    { path: '/backtest', name: 'Backtest (ทดสอบ)', icon: <FlaskConical size={20} /> },
     { path: '/binance-live', name: 'Binance (Live Sim)', icon: <Bot size={20} color="#faad14" /> },
+    { path: '/backtest', name: 'Backtest (ทดสอบ)', icon: <FlaskConical size={20} /> },
   ];
   const bottomItems = [
     { path: '/strategies', name: 'กลยุทธ์', icon: <Settings size={20} /> },
@@ -58,12 +56,10 @@ function TopHeader() {
   );
 }
 
-import Dashboard from './pages/Dashboard';
 import Strategies from './pages/Strategies';
 import Logs from './pages/Logs';
 import Backtest from './pages/Backtest';
-import Portfolio from './pages/Portfolio';
-import BinanceTestnet from './pages/BinanceTestnet';
+import BinanceLive from './pages/BinanceLive';
 import ConfigPage from './pages/Config';
 
 function App() {
@@ -74,10 +70,9 @@ function App() {
         <TopHeader />
         <main className="page-content animate-fade-in">
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/portfolio" element={<Portfolio />} />
+            <Route path="/" element={<BinanceLive />} />
+            <Route path="/binance-live" element={<BinanceLive />} />
             <Route path="/backtest" element={<Backtest />} />
-            <Route path="/binance-live" element={<BinanceTestnet />} />
             <Route path="/strategies" element={<Strategies />} />
             <Route path="/logs" element={<Logs />} />
             <Route path="/config" element={<ConfigPage />} />

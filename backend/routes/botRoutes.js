@@ -4,9 +4,21 @@ import * as dbService from '../db/dbService.js';
 export function createBotRoutes(botService) {
     const router = express.Router();
 
-    router.get('/status', (req, res) => {
-        const botsArray = Array.from(botService.bots.values());
-        res.json(botsArray);
+    router.get('/status', async (req, res) => {
+        try {
+            const { getAllBots } = await import('../db/sqlite.js');
+            const dbBots = getAllBots();
+            
+            // Merge with local memory state
+            const merged = dbBots.map(dbBot => {
+                const memBot = botService.bots.get(dbBot.id);
+                return memBot ? { ...dbBot, ...memBot, isRunning: memBot.isRunning } : dbBot;
+            });
+
+            res.json(merged);
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
     });
 
     router.post('/start', async (req, res) => {

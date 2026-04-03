@@ -1,0 +1,15 @@
+{
+  "name": "@trading/data-layer",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./bots": "./src/repositories/botRepository.js",
+    "./trades": "./src/repositories/tradeRepository.js",
+    "./config": "./src/repositories/configRepository.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1"
+  }
+}

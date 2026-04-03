@@ -32,11 +32,22 @@ export function loadBots() {
     return sqlite.getAllBots();
 }
 
+export function saveBot(bot) {
+    sqlite.saveBot(bot);
+}
+
 export function saveBots(botsMap) {
-    // We save individually in BotService usually to avoid massive rewrites
     for (const bot of botsMap.values()) {
         sqlite.saveBot(bot);
     }
+}
+
+export function saveBotTuningLog(log) {
+    sqlite.saveBotTuningLog(log);
+}
+
+export function getTuningHistory(limit = 50) {
+    return sqlite.getBotTuningHistory(limit);
 }
 
 // Trade Memory

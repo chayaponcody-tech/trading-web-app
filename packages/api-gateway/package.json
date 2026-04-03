@@ -1,0 +1,12 @@
+{
+  "name": "@trading/api-gateway",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/server.js",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.0"
+  }
+}

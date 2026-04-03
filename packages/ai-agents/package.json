@@ -1,0 +1,14 @@
+{
+  "name": "@trading/ai-agents",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./src/OpenRouterClient.js",
+    "./recommender": "./src/RecommenderAgent.js",
+    "./reviewer": "./src/ReviewerAgent.js",
+    "./reflection": "./src/ReflectionAgent.js",
+    "./optimizer": "./src/OptimizerAgent.js"
+  }
+}
