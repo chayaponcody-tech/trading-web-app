@@ -69,8 +69,18 @@ export async function callOpenRouter(prompt, apiKey, model = DEFAULT_MODEL, opts
                 return resolve(JSON.parse(content));
               } catch (e) {
                 // 2. Extract JSON block if wrapped in markdown or extra text
-                const start = content.indexOf('{');
-                const end = content.lastIndexOf('}');
+                let start = content.indexOf('{');
+                let end = content.lastIndexOf('}');
+                
+                // If it looks like an array, search for brackets
+                const arrayStart = content.indexOf('[');
+                const arrayEnd = content.lastIndexOf(']');
+                
+                if (arrayStart !== -1 && (start === -1 || arrayStart < start)) {
+                  start = arrayStart;
+                  end = arrayEnd;
+                }
+
                 if (start !== -1 && end !== -1) {
                   const cleaned = content.substring(start, end + 1)
                     .replace(/\/\/.*$/gm, '')           // Strip // comments

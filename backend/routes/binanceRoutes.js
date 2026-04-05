@@ -11,22 +11,34 @@ export function createBinanceRoutes(botService) {
             apiKey: config.apiKey,
             openRouterKey: config.openRouterKey ? 'SET' : 'NOT_SET',
             openRouterModel: config.openRouterModel || 'google/gemini-2.0-flash-exp:free',
+            telegramToken: config.telegramToken ? '********' : '',
+            telegramChatId: config.telegramChatId || '',
             hasKeys: !!(config.apiKey && config.apiSecret),
             hasSecret: !!config.apiSecret,
-            hasOpenRouter: !!config.openRouterKey
+            hasOpenRouter: !!config.openRouterKey,
+            hasTelegram: !!(config.telegramToken && config.telegramChatId)
         });
     });
 
-    router.post('/config', (req, res) => {
-        const { apiKey, apiSecret, openRouterKey, openRouterModel } = req.body;
+    router.post('/config', async (req, res) => {
+        const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId } = req.body;
         const config = dbService.loadBinanceConfig();
         
         if (apiKey) config.apiKey = apiKey;
         if (apiSecret) config.apiSecret = apiSecret;
         if (openRouterKey) config.openRouterKey = openRouterKey;
         if (openRouterModel) config.openRouterModel = openRouterModel;
+        if (telegramToken) config.telegramToken = telegramToken;
+        if (telegramChatId) config.telegramChatId = telegramChatId;
         
         dbService.saveBinanceConfigToFile(config);
+        
+        // Reload notification service if possible (optional but recommended)
+        if (botService.setNotificationService) {
+            const { NotificationService } = await import('../services/notificationService.js');
+            botService.setNotificationService(new NotificationService(config));
+        }
+
         res.json({ success: true });
     });
 

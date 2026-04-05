@@ -136,9 +136,9 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
         <MiniStat label="Realized (Closed)" value={`${(bot.realizedPnl || 0) >= 0 ? '+' : ''}${(bot.realizedPnl || 0).toFixed(2)}`} color={(bot.realizedPnl || 0) >= 0 ? '#0ecb81' : '#f6465d'} />
         <MiniStat label="Unrealized (Open)" value={`${(bot.unrealizedPnl || 0) >= 0 ? '+' : ''}${(bot.unrealizedPnl || 0).toFixed(2)}`} color={(bot.unrealizedPnl || 0) >= 0 ? '#faad14' : '#f6465d'} />
         <MiniStat label="Bot Net PnL" value={`${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)}`} color={netPnlColor} />
-        <MiniStat label="Capital" value={`$${(bot.capital || 0).toFixed(2)}`} color="#faad14" />
+        <MiniStat label="Smart Budget" value={`$${(bot.config.positionSizeUSDT || bot.capital || 0).toFixed(2)}`} color="#faad14" />
         <MiniStat label="Win Rate" value={`${winRate}%`} color={parseFloat(winRate) >= 50 ? '#0ecb81' : '#f6465d'} />
-        <MiniStat label="Equity" value={`$${(bot.equity || 0).toFixed(2)}`} color={(bot.equity || 0) >= (bot.capital || 0) ? '#0ecb81' : '#f6465d'} />
+        <MiniStat label="Risk Shield" value={`$${(bot.config.maxLossUSDT || (bot.config.positionSizeUSDT || bot.capital || 0) * 0.05).toFixed(2)}`} color="#f6465d" />
       </div>
 
       {/* Current Diagnostic Thought (Live Brain) */}
@@ -161,7 +161,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
         }}>🧠</div>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '0.64rem', color: '#888', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '0.1rem', letterSpacing: '0.5px', display: 'flex', justifyContent: 'space-between' }}>
-            <span>{bot.isRunning ? `Bot Real-time Analysis ${bot.lastThoughtAt ? `(${new Date(bot.lastThoughtAt).toLocaleTimeString()})` : ''}` : 'Engine Idle'}</span>
+            <span>{bot.isRunning ? `Bot Real-time Analysis ${bot.lastThoughtAt ? `(${new Date(bot.lastThoughtAt).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' })})` : ''}` : 'Engine Idle'}</span>
             {bot.isRunning && <span style={{ color: '#faad14', fontSize: '0.55rem', opacity: 0.6 }}>● SCANNING</span>}
           </div>
           <div style={{ 
@@ -307,7 +307,7 @@ function TradeList({ trades }: { trades: any[] }) {
           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', padding: '0.7rem', background: 'rgba(0,0,0,0.15)', borderRadius: '6px', borderLeft: `3px solid ${t.pnl >= 0 ? '#0ecb81' : '#f6465d'}` }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
               <div style={{ fontWeight: 'bold' }}><span style={{ color: t.pnl >= 0 ? '#0ecb81' : '#f6465d' }}>{t.type}</span> | ${t.exitPrice?.toFixed(2)}</div>
-              <div style={{ fontSize: '0.6rem', color: '#666' }}>{new Date(t.exitTime).toLocaleString()}</div>
+              <div style={{ fontSize: '0.6rem', color: '#666' }}>{new Date(t.exitTime).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ color: t.pnl >= 0 ? '#0ecb81' : '#f6465d', fontWeight: 'bold' }}>{t.pnl >= 0 ? '+' : ''}{parseFloat(t.pnl).toFixed(2)}</div>

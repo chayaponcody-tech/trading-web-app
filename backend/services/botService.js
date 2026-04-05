@@ -16,6 +16,7 @@ export class BotService {
         this.symbolRules = {};
         this.tuningService = new TuningService(binanceService, binanceConfig);
         this.tickCount = 0;
+        this.notificationService = null; // Set via server.js or method
         
         // Initialize from file
         const loaded = dbService.loadBots();
@@ -31,6 +32,10 @@ export class BotService {
     setBinanceService(service, config) {
         this.binanceService = service;
         this.binanceConfig = config;
+    }
+
+    setNotificationService(service) {
+        this.notificationService = service;
     }
 
     setSymbolRules(rules) {
@@ -102,6 +107,9 @@ export class BotService {
         this.bots.delete(botId);
         dbService.saveBots(Array.from(this.bots.values()));
         console.log(`[Bot ${botId}] Deleted`);
+        if (this.notificationService) {
+            this.notificationService.send(`🗑️ *Bot Deleted*\nBot ID: \`${botId.slice(-6)}\``);
+        }
     }
 
     resumeBot(botId) {
@@ -325,6 +333,12 @@ export class BotService {
             }
         }
 
+        // Notify only once for entire entry initialization
+        if (this.notificationService && bot.openPositions.length > 0) {
+            const lastPos = bot.openPositions[bot.openPositions.length - 1];
+            this.notificationService.notifyOpen(bot, lastPos);
+        }
+
         bot.lastEntryReason = `AI/Grid Entry initialized (${steps.length} steps)`;
     }
 
@@ -354,6 +368,11 @@ export class BotService {
             bot.trades.push(tradeData);
             dbService.saveTradeMemory(tradeData);
             console.log(`[Bot ${bot.id}] ${reason}: ${pnl.toFixed(4)} USDT`);
+            
+            // Send Notification
+            if (this.notificationService) {
+                this.notificationService.notifyTrade(bot, tradeData);
+            }
         } catch (e) {
             console.error(`[Bot ${bot.id}] Close position error:`, e.message);
             // Even if binance fails (e.g. already closed manually), we should sync if it is actually closed

@@ -1,6 +1,6 @@
 // ─── Shared Types for BinanceTestnet Feature ──────────────────────────────────
 
-export const API = 'http://localhost:4001';
+export const API = '';
 
 export const STRATEGIES = [
   { value: 'EMA', label: 'EMA Crossover (20/50)' },
@@ -70,6 +70,7 @@ export interface Bot {
     useReflection?: boolean;
     groupId?: string;
     entry_steps?: any[];
+    maxLossUSDT?: number;
   };
   openPositions: OpenPosition[];
   expiresAt?: string;

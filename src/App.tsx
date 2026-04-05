@@ -1,16 +1,18 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Settings, Terminal, FlaskConical, Bot } from 'lucide-react';
+import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare } from 'lucide-react';
 import './App.css';
 
 function Sidebar() {
   const location = useLocation();
   const cryptoItems = [
+    { path: '/portfolio', name: 'AI Portfolio (PORT)', icon: <ShieldCheck size={20} color="#00d1ff" /> },
     { path: '/binance-live', name: 'Binance (Live Sim)', icon: <Bot size={20} color="#faad14" /> },
     { path: '/backtest', name: 'Backtest (ทดสอบ)', icon: <FlaskConical size={20} /> },
   ];
   const bottomItems = [
     { path: '/strategies', name: 'กลยุทธ์', icon: <Settings size={20} /> },
     { path: '/logs', name: 'บันทึก (Logs)', icon: <Terminal size={20} /> },
+    { path: '/telegram-logs', name: 'Telegram Logs', icon: <MessageSquare size={20} color="#0088cc" /> },
   ];
 
   const NavLink = ({ item }: { item: { path: string; name: string; icon: React.ReactNode } }) => (
@@ -61,6 +63,8 @@ import Logs from './pages/Logs';
 import Backtest from './pages/Backtest';
 import BinanceLive from './pages/BinanceLive';
 import ConfigPage from './pages/Config';
+import Portfolio from './pages/Portfolio';
+import TelegramLogs from './pages/TelegramLogs';
 
 function App() {
   return (
@@ -70,11 +74,13 @@ function App() {
         <TopHeader />
         <main className="page-content animate-fade-in">
           <Routes>
-            <Route path="/" element={<BinanceLive />} />
+            <Route path="/" element={<Portfolio />} />
+            <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/binance-live" element={<BinanceLive />} />
             <Route path="/backtest" element={<Backtest />} />
             <Route path="/strategies" element={<Strategies />} />
             <Route path="/logs" element={<Logs />} />
+            <Route path="/telegram-logs" element={<TelegramLogs />} />
             <Route path="/config" element={<ConfigPage />} />
           </Routes>
         </main>

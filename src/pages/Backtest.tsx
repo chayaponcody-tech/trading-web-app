@@ -302,7 +302,7 @@ export default function Backtest() {
   useEffect(() => {
     const fetchPreview = async () => {
       try {
-        const res = await fetch(`http://localhost:4001/api/backtest?symbol=${symbol}&interval=${interval}&limit=1000`);
+        const res = await fetch(`/api/backtest?symbol=${symbol}&interval=${interval}&limit=1000`);
         const data = await res.json();
         if (!Array.isArray(data)) return;
 
@@ -353,7 +353,7 @@ export default function Backtest() {
     try {
       const startMs = startDate ? new Date(startDate).getTime() : '';
       const endMs = endDate ? new Date(endDate).getTime() : '';
-      const res = await fetch(`http://localhost:4001/api/backtest?symbol=${symbol}&interval=${interval}&limit=1000${startMs ? `&startTime=${startMs}` : ''}${endMs ? `&endTime=${endMs}` : ''}`);
+      const res = await fetch(`/api/backtest?symbol=${symbol}&interval=${interval}&limit=1000${startMs ? `&startTime=${startMs}` : ''}${endMs ? `&endTime=${endMs}` : ''}`);
       const data = await res.json();
       if (!Array.isArray(data)) throw new Error('Data fetch failed');
 

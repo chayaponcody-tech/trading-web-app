@@ -73,3 +73,11 @@ export function loadBinanceConfig() {
 export function saveBinanceConfigToFile(config) {
     sqlite.saveSetting('binanceConfig', config);
 }
+
+export function saveTelegramLog(direction, chatId, message) {
+    sqlite.saveTelegramLog(direction, chatId, message);
+}
+
+export function getTelegramLogs(limit = 100) {
+    return sqlite.getTelegramLogs(limit);
+}

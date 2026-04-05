@@ -141,6 +141,26 @@ export function saveBotMap(botsMap) {
   return saveAllBots(arr);
 }
 
+export function getSetting(key, defaultValue = null) {
+  if (useSqlite) {
+    try {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+      return row ? JSON.parse(row.value) : defaultValue;
+    } catch { return defaultValue; }
+  }
+  return readJson(DATA_FILES[key] || key, defaultValue);
+}
+
+export function saveSetting(key, value) {
+  if (useSqlite) {
+    try {
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run(key, JSON.stringify(value));
+      return true;
+    } catch { return false; }
+  }
+  return writeJson(DATA_FILES[key] || key, value);
+}
+
 export function saveBotTuningLog(log) {
   if (useSqlite) {
     try {

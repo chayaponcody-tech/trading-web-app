@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import SymbolSelector from '../components/SymbolSelector';
 
-const API = 'http://localhost:4001';
+const API = '';
 
 const STRATEGIES = [
   { value: 'EMA', label: 'EMA Crossover' },

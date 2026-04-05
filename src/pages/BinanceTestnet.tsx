@@ -272,7 +272,14 @@ export default function BinanceTestnet() {
     try {
       const res = await fetch(`${API}/api/forward-test/status`);
       const data = await res.json();
-      setBots(Array.isArray(data) ? data.filter(b => b.config.exchange === 'binance_testnet') : []);
+      // Improved Filter: Show if tagged for testnet OR if it's an AI-managed bot (via isAutonomous flag or keyword)
+      setBots(Array.isArray(data) ? data.filter(b => 
+        b.config?.exchange === 'binance_testnet' || 
+        b.config?.isAutonomous === true ||
+        b.config?.aiReason?.includes('Portfolio') || 
+        b.config?.aiReason?.includes('Autonomous') ||
+        b.config?.aiReason?.includes('Fleet')
+      ) : []);
     } catch {}
   };
 
@@ -647,10 +654,23 @@ export default function BinanceTestnet() {
               <div style={{ fontSize: '0.65rem', color: '#faad14', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 ⚙️ Strategy Core
               </div>
-              <select value={strategy} onChange={e => setStrategy(e.target.value)} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: '#fff', padding: '0.5rem', borderRadius: '4px', fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '0.6rem' }}>
-                {STRATEGIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Algorithm:</span>
+                  <select value={strategy} onChange={e => setStrategy(e.target.value)} style={{ flex: 1, background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: '#fff', padding: '0.3rem', borderRadius: '4px', fontSize: '0.75rem' }}>
+                    {STRATEGIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.75rem', color: '#faad14', whiteSpace: 'nowrap', fontWeight: 'bold' }}>AI Intel:</span>
+                  <select value={aiMode} onChange={e => setAiMode(e.target.value as any)} style={{ flex: 1, background: 'rgba(250,173,20,0.1)', border: '1px solid #faad14', color: '#faad14', padding: '0.3rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 'bold' }}>
+                    <option value="confident">✨ AI Precision</option>
+                    <option value="grid">📈 AI Grid Pro</option>
+                    <option value="scout">🏹 Quick Scout</option>
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.6rem' }}>
                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Order Size ($):</span>
                     <input type="number" value={positionSizeUSDT} onChange={e => setPositionSizeUSDT(parseFloat(e.target.value))} style={{ width: '70px', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: '#fff', padding: '0.3rem', borderRadius: '4px', textAlign: 'right', fontSize: '0.75rem' }} />
@@ -709,17 +729,17 @@ export default function BinanceTestnet() {
             {/* 4. AI Co-Pilot Tools */}
             <div style={{ padding: '1rem', background: 'linear-gradient(135deg, rgba(250,173,20,0.08), rgba(14,203,129,0.08))', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)', boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
               <div style={{ fontSize: '0.7rem', color: '#fff', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '0.8rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                🧠 AI Co-Pilot
+                🧠 AI Strategic Cognition
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '0.8rem' }}>
-                <button onClick={() => handleAIRecommend('confident')} disabled={loading} style={{ padding: '0.6rem', background: 'rgba(0,0,0,0.3)', border: '1px solid #faad1488', color: '#faad14', borderRadius: '8px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 'bold', transition: 'all 0.2s' }}>
+                <button onClick={() => { setAiMode('confident'); handleAIRecommend('confident'); }} disabled={loading} style={{ padding: '0.6rem', background: aiMode === 'confident' ? 'rgba(250,173,20,0.3)' : 'rgba(0,0,0,0.3)', border: aiMode === 'confident' ? '2px solid #faad14' : '1px solid #faad1488', color: '#faad14', borderRadius: '8px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 'bold', transition: 'all 0.2s', boxShadow: aiMode === 'confident' ? '0 0 10px rgba(250,173,20,0.3)' : 'none' }}>
                   {loading && aiMode === 'confident' ? '...' : '✨ Precision'}
                 </button>
-                <button onClick={() => handleAIRecommend('grid')} disabled={loading} style={{ padding: '0.6rem', background: 'rgba(0,0,0,0.3)', border: '1px solid #0ecb8188', color: '#0ecb81', borderRadius: '8px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 'bold', transition: 'all 0.2s' }}>
+                <button onClick={() => { setAiMode('grid'); handleAIRecommend('grid'); }} disabled={loading} style={{ padding: '0.6rem', background: aiMode === 'grid' ? 'rgba(14,203,129,0.3)' : 'rgba(0,0,0,0.3)', border: aiMode === 'grid' ? '2px solid #0ecb81' : '1px solid #0ecb8188', color: '#0ecb81', borderRadius: '8px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 'bold', transition: 'all 0.2s', boxShadow: aiMode === 'grid' ? '0 0 10px rgba(14,203,129,0.3)' : 'none' }}>
                   {loading && aiMode === 'grid' ? '...' : '📈 AI Grid'}
                 </button>
               </div>
-              <button onClick={() => handleAIRecommend('scout')} disabled={loading} style={{ width: '100%', padding: '0.6rem', background: 'rgba(0,0,0,0.3)', border: '1px solid #f6465d88', color: '#f6465d', borderRadius: '8px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 'bold', marginBottom: '0.8rem' }}>
+              <button onClick={() => { setAiMode('scout'); handleAIRecommend('scout'); }} disabled={loading} style={{ width: '100%', padding: '0.6rem', background: aiMode === 'scout' ? 'rgba(246,70,93,0.3)' : 'rgba(0,0,0,0.3)', border: aiMode === 'scout' ? '2px solid #f6465d' : '1px solid #f6465d88', color: '#f6465d', borderRadius: '8px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 'bold', marginBottom: '0.8rem', boxShadow: aiMode === 'scout' ? '0 0 10px rgba(246,70,93,0.3)' : 'none' }}>
                 {loading && aiMode === 'scout' ? '...' : '🏹 Quick Scout / Scalp'}
               </button>
 

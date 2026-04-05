@@ -3,6 +3,7 @@ import { RSIStrategy } from './strategies/RSI.js';
 import { BollingerBandsStrategy } from './strategies/BollingerBands.js';
 import { GridStrategy } from './strategies/Grid.js';
 import { ScouterStrategy } from './strategies/Scouter.js';
+import { EMA_RSI, BB_RSI, EMA_BB_RSI } from './strategies/Composite.js';
 
 // ─── Signal Engine ────────────────────────────────────────────────────────────
 // The single source of truth for all technical signal computations.
@@ -22,6 +23,9 @@ const STRATEGY_REGISTRY = {
   AI_GRID_SCALP: GridStrategy,
   AI_GRID_SWING: GridStrategy,
   AI_SCOUTER:  ScouterStrategy,
+  EMA_RSI:     EMA_RSI,
+  BB_RSI:      BB_RSI,
+  EMA_BB_RSI:  EMA_BB_RSI,
   // Add more here...
 };
 

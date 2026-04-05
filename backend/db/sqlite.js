@@ -41,6 +41,10 @@ async function initDb() {
             oldParams TEXT, newParams TEXT, reasoning TEXT, marketCondition TEXT,
             recordedAt DATETIME DEFAULT CURRENT_TIMESTAMP
           );
+          CREATE TABLE IF NOT EXISTS telegram_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, direction TEXT, chatId TEXT, 
+            message TEXT, recordedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+          );
         `);
 
         // Migration: Ensure trades column exists in bots table
@@ -235,6 +239,22 @@ export function getTradeMemory(limit = 100) {
         }
         return [];
     }
+}
+
+export function saveTelegramLog(direction, chatId, message) {
+    if (useSqlite) {
+        try { 
+          db.prepare('INSERT INTO telegram_logs (direction, chatId, message) VALUES (?, ?, ?)')
+            .run(direction, chatId, message); 
+        } catch {}
+    }
+}
+
+export function getTelegramLogs(limit = 100) {
+    if (useSqlite) {
+        try { return db.prepare('SELECT * FROM telegram_logs ORDER BY id DESC LIMIT ?').all(limit); } catch { return []; }
+    }
+    return [];
 }
 
 export { initDb };

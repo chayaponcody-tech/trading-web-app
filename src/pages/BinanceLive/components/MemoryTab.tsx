@@ -23,7 +23,7 @@ export default function MemoryTab({ tradeMemory }: Props) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                 <div>Strategy: <span style={{ color: '#eee' }}>{t.strategy}</span></div>
                 <div>Reason: <span style={{ color: '#eee' }}>{t.reason}</span></div>
-                <div>Closed At: <span style={{ color: '#eee' }}>{new Date(t.exitTime).toLocaleString('th-TH')}</span></div>
+                <div>Closed At: <span style={{ color: '#eee' }}>{new Date(t.exitTime).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}</span></div>
               </div>
             </div>
           ))

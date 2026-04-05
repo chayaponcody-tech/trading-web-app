@@ -56,7 +56,38 @@ export function createBinanceRoutes(botManager, binanceConfig) {
       hasSecret: !!cfg.apiSecret,
       hasOpenRouter: !!cfg.openRouterKey,
       openRouterModel: cfg.openRouterModel,
+      telegramChatId: cfg.telegramChatId || '',
+      hasTelegram: !!(cfg.telegramToken && cfg.telegramChatId)
     });
+  });
+
+  // Handle POST to /api/binance/config (fix for frontend error)
+  r.post('/config', async (req, res, next) => {
+    try {
+        const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId } = req.body;
+        const { patchBinanceConfig } = await import('../../../data-layer/src/repositories/configRepository.js');
+        patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId });
+        
+        // Refresh BotManager config
+        const updated = loadBinanceConfig();
+        botManager.setConfig(updated);
+        
+        // Hot-swap telegram service (if implemented on BotManager)
+        if (botManager.setNotificationService) {
+           const { NotificationService } = await import('../../../bot-engine/src/NotificationService.js');
+           botManager.setNotificationService(new NotificationService(updated));
+        }
+
+        res.json({ success: true });
+    } catch (e) { next(e); }
+  });
+
+  r.get('/telegram-logs', async (req, res, next) => {
+    try {
+        const { getTelegramLogs } = await import('../../../data-layer/src/index.js');
+        const logs = getTelegramLogs(50);
+        res.json(logs);
+    } catch (e) { next(e); }
   });
 
   // AI aliases inside /api/binance

@@ -69,7 +69,7 @@ export default function AutoTrendChart({ symbol }: ChartProps) {
 
   const saveToServer = async (updates: Record<string, unknown>) => {
     try {
-      await fetch('http://localhost:4001/api/state', {
+      await fetch('/api/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates)
@@ -83,7 +83,7 @@ export default function AutoTrendChart({ symbol }: ChartProps) {
   const syncSl = (val: number) => { setSlPercent(val); saveToServer({ slPercent: val }); };
 
   useEffect(() => {
-    fetch('http://localhost:4001/api/state')
+    fetch('/api/state')
       .then(res => res.json())
       .then(data => {
         setIsBotRunning(data.isBotRunning);

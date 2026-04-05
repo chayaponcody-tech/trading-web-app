@@ -85,7 +85,7 @@ export default function HistoryTab({ tradeHistory, fetchingHistory, fetchHistory
                   <div>Entry: <span style={{ color: '#eee' }}>${parseFloat(t.entryPrice).toFixed(4)}</span></div>
                   <div>Exit: <span style={{ color: '#eee' }}>${parseFloat(t.exitPrice).toFixed(4)}</span></div>
                   <div>Reason: <span style={{ color: '#faad14' }}>{t.reason || 'Closed'}</span></div>
-                  <div style={{ textAlign: 'right' }}>Time: <span style={{ color: '#888' }}>{new Date(t.exitTime).toLocaleString('th-TH')}</span></div>
+                  <div style={{ textAlign: 'right' }}>Time: <span style={{ color: '#888' }}>{new Date(t.exitTime).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}</span></div>
                 </div>
               </div>
             );

@@ -24,15 +24,19 @@ Identify the TOP 5 most suitable coins that fit the goal perfectly based on thei
 - For Trend: Look for steady positive momentum (> 3%) with strong volume support.
 
 RESPONSE FORMAT (strict JSON only):
-[
-  { "symbol": "SYMBOL", "reason": "Short catchy reason in Thai", "score": 1-100, "tag": "short-tag" },
-  ...
-]
-No markdown, no explanation. Just the JSON array.`;
+{
+  "recommendations": [
+    { "symbol": "SYMBOL", "reason": "Short catchy reason in Thai", "score": 1-100, "tag": "short-tag" },
+    ...
+  ]
+}
+No markdown, no explanation. Just the JSON object.`;
 
   try {
     const raw = await callOpenRouter(prompt, apiKey, model);
-    return Array.isArray(raw) ? raw : [];
+    if (raw && Array.isArray(raw.recommendations)) return raw.recommendations;
+    if (Array.isArray(raw)) return raw; // Fallback
+    return [];
   } catch (e) {
     console.error('Hunter Agent Error:', e.message);
     return [];

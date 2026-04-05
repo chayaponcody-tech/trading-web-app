@@ -1,18 +1,28 @@
 # ─── Docker Compose for CryptoSmartTrade ─────────────────────────────────────
 
 services:
-  app:
-    build: .
+  backend:
+    build:
+      context: .
+      target: backend-runtime
+    container_name: cryptosmarttrade-backend
     ports:
-      - "4001:4001" # Backend API
-      - "5173:5173" # Frontend (Dev mode)
+      - "4001:4001"
+    environment:
+      - NODE_ENV=production
+      - PORT=4001
     volumes:
       - ./trading_app.db:/app/trading_app.db
       - ./binance-config.json:/app/binance-config.json
-    environment:
-      - NODE_ENV=development
-      - PORT=4001
     restart: unless-stopped
 
-  # Note: For production, we'd use Nginx or serve dist/ 
-  # via the Express server to consolidate to one container.
+  frontend:
+    build:
+      context: .
+      target: frontend-runtime
+    container_name: cryptosmarttrade-frontend
+    ports:
+      - "4000:80" # เข้าหน้าเว็บผ่านพอร์ต 4000 (Nginx จะจัดการส่งต่อ /api ให้ Backend อัตโนมัติ)
+    depends_on:
+      - backend
+    restart: unless-stopped

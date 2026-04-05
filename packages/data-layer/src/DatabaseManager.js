@@ -77,6 +77,13 @@ export function initDb() {
         marketCondition TEXT,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE TABLE IF NOT EXISTS telegram_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, 
+        direction TEXT, 
+        chatId TEXT, 
+        message TEXT, 
+        recordedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     // --- MIGRATIONS ---

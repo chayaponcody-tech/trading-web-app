@@ -27,6 +27,7 @@ export class BotManager {
     this.symbolRules = {};         // symbol → { stepSize, minQty, precision }
     this.tuningService = new TuningService(exchange, config);
     this.tickCount = 0;
+    this.notificationService = null;
   }
 
   // ─── Dependency Injection ────────────────────────────────────────────────────
@@ -34,6 +35,10 @@ export class BotManager {
   setExchange(exchange) { this.exchange = exchange; }
   setConfig(config)     { this.config = config; }
   setSymbolRules(rules) { this.symbolRules = rules; }
+
+  setNotificationService(service) {
+    this.notificationService = service;
+  }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
@@ -80,6 +85,11 @@ export class BotManager {
     this._scheduleBot(botId);
     this._save();
     console.log(`[BotManager] Started ${botId}: ${botConfig.symbol} ${botConfig.strategy}`);
+    
+    if (this.notificationService) {
+        this.notificationService.send(`🚀 *Bot Lifecycle Started*\nSymbol: \`${botConfig.symbol}\`\nStrategy: \`${botConfig.strategy}\`\nBot ID: \`${botId.slice(-6)}\``);
+    }
+
     return botId;
   }
 
@@ -118,6 +128,10 @@ export class BotManager {
     this.bots.delete(botId);
     deleteBot(botId); // Also delete from persistent storage
     console.log(`[BotManager] Deleted ${botId}`);
+    
+    if (this.notificationService) {
+        this.notificationService.send(`🗑️ *Bot Deleted*\nBot ID: \`${botId.slice(-6)}\``);
+    }
   }
 
   loadBots(botsArray) {
@@ -338,16 +352,24 @@ export class BotManager {
       console.warn(`[Bot ${bot.id}] setLeverage failed:`, e.message);
     }
 
-    // Safety Lock: Check if bot has enough internal equity to cover the required position size
-    if (posValue > bot.equity) {
-      const msg = `INSUFFICIENT FUNDS: Need ${posValue} USDT but only ${bot.equity.toFixed(2)} USDT shared balance remains for this bot. Stopping.`;
-      console.log(`[Bot ${bot.id}] ${msg}`);
-      bot.aiReason = msg;
-      this.stopBot(bot.id);
-      return;
+    // Handle position sizing based on current equity (Safety Lock & Dynamic Sizing)
+    let tradeValue = posValue;
+    if (tradeValue > bot.equity) {
+      // Critical threshold: if less than 5 USDT remains, stop the bot to prevent meaningless trades
+      if (bot.equity < 5) {
+        const msg = `CRITICAL FUND LOSS: Only ${bot.equity.toFixed(2)} USDT remains. Stopping for protection.`;
+        console.warn(`[Bot ${bot.id}] ${msg}`);
+        bot.aiReason = msg;
+        this.stopBot(bot.id);
+        return;
+      }
+      
+      // Dynamic scaling: trade with whatever is left (e.g. 95 instead of 100)
+      console.log(`[Bot ${bot.id}] Adjusting trade size from ${posValue} to ${bot.equity.toFixed(2)} USDT (Reason: Net PnL Drawdown)`);
+      tradeValue = bot.equity;
     }
 
-    const rawTotalQty = (posValue * leverage) / currPrice;
+    const rawTotalQty = (tradeValue * leverage) / currPrice;
     
     // Get AI-recommended entry steps or default to simple 100% Market if none
     let steps = bot.config.entry_steps || [{ type: 'MARKET', weightPct: 100, offsetPct: 0 }];
@@ -423,6 +445,10 @@ export class BotManager {
       }
     }
 
+    if (this.notificationService && bot.openPositions.length > 0) {
+        this.notificationService.notifyOpen(bot, bot.openPositions[bot.openPositions.length - 1]);
+    }
+
     bot.lastEntryReason = `AI Layered Entry initialized (${steps.length} steps)`;
   }
 
@@ -455,6 +481,10 @@ export class BotManager {
       bot.trades.push(trade);
       appendTrade(trade);
       console.log(`[Bot ${bot.id}] ${reason}: ${pnl.toFixed(4)} USDT`);
+
+      if (this.notificationService) {
+          this.notificationService.notifyTrade(bot, trade);
+      }
     } catch (e) {
       console.error(`[Bot ${bot.id}] Close error:`, e.message);
       if (e.message.includes('No open position')) {

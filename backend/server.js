@@ -5,6 +5,7 @@ import { BotService } from './services/botService.js';
 import { createBinanceRoutes } from './routes/binanceRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import { createBotRoutes } from './routes/botRoutes.js';
+import { NotificationService } from './services/notificationService.js';
 import * as dbService from './db/dbService.js';
 import { initDb } from './db/sqlite.js';
 
@@ -31,6 +32,8 @@ async function startServer() {
     }
 
     const botService = new BotService(binanceService, binanceConfig);
+    const notificationService = new NotificationService(binanceConfig);
+    botService.setNotificationService(notificationService);
 
     // 3. Perform startup tasks (async)
     if (binanceService) {

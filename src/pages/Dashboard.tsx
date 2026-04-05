@@ -27,7 +27,7 @@ export default function Dashboard() {
   useEffect(() => {
     // Fetch backend state for stats and trades
     const fetchBackend = () => {
-       fetch('http://localhost:4001/api/state')
+       fetch('/api/state')
          .then(res => res.json())
          .then(data => setBackendState(data))
          .catch(err => console.error(err));

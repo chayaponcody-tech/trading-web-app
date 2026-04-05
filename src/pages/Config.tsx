@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Settings, Shield, Cpu, Key } from 'lucide-react';
 
-const API = 'http://localhost:4001';
+const API = '';
 
 export default function ConfigPage() {
   const [binanceKeys, setBinanceKeys] = useState({ 
@@ -9,10 +9,14 @@ export default function ConfigPage() {
     apiSecret: '', 
     openRouterKey: '', 
     openRouterModel: 'meta-llama/llama-3.1-8b-instruct',
+    telegramToken: '',
+    telegramChatId: '',
     hasKeys: false, 
-    hasOpenRouter: false 
+    hasOpenRouter: false,
+    hasTelegram: false
   });
   const [tempORKey, setTempORKey] = useState('');
+  const [tempTGToken, setTempTGToken] = useState('');
   const [loading, setLoading] = useState(false);
 
   const fetchBinanceConfig = async () => {
@@ -24,9 +28,12 @@ export default function ConfigPage() {
           apiKey: data.apiKey === '********' ? '' : data.apiKey, 
           hasKeys: data.hasKeys || (data.apiKey === '********' && data.hasSecret),
           hasOpenRouter: data.hasOpenRouter,
+          hasTelegram: data.hasTelegram,
           openRouterModel: data.openRouterModel || prev.openRouterModel,
+          telegramChatId: data.telegramChatId || '',
           apiSecret: '', 
-          openRouterKey: '' 
+          openRouterKey: '',
+          telegramToken: ''
       }));
     } catch {}
   };
@@ -45,12 +52,15 @@ export default function ConfigPage() {
                 apiKey: binanceKeys.apiKey, 
                 apiSecret: binanceKeys.apiSecret,
                 openRouterKey: tempORKey || undefined,
-                openRouterModel: binanceKeys.openRouterModel
+                openRouterModel: binanceKeys.openRouterModel,
+                telegramToken: tempTGToken || undefined,
+                telegramChatId: binanceKeys.telegramChatId
             })
         });
         if (!res.ok) throw new Error(await res.text());
         await fetchBinanceConfig();
         setTempORKey('');
+        setTempTGToken('');
         alert('Global Configuration Saved Successfully!');
     } catch (e: any) {
         alert('Save Error: ' + e.message);
@@ -138,6 +148,47 @@ export default function ConfigPage() {
                     {binanceKeys.hasOpenRouter ? 'AI Engine Ready for Analysis' : 'AI Strategic Key Missing'}
                 </div>
             </div>
+         </div>
+
+         {/* NEW: Telegram Section */}
+         <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #0088cc', gridColumn: 'span 2' }}>
+            <h2 style={{ color: '#0088cc', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Shield size={24} color="#0088cc" /> Telegram Bot Notifications
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#aaa' }}>Telegram Bot Token</label>
+                        <input 
+                            type="password" 
+                            value={tempTGToken} 
+                            onChange={e => setTempTGToken(e.target.value)} 
+                            placeholder={binanceKeys.hasTelegram ? "✓ Token Saved (Encrypted)" : "123456:ABC-DEF..."} 
+                            style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: '#fff', borderRadius: '4px' }} 
+                        />
+                        <p style={{ fontSize: '0.75rem', color: '#666', margin: 0 }}>Create a bot via @BotFather</p>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                        <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: '#aaa' }}>Telegram Chat ID</label>
+                        <input 
+                            type="text" 
+                            value={binanceKeys.telegramChatId} 
+                            onChange={e => setBinanceKeys(k => ({ ...k, telegramChatId: e.target.value }))} 
+                            placeholder="e.g. 123456789" 
+                            style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: '#fff', borderRadius: '4px' }} 
+                        />
+                        <p style={{ fontSize: '0.75rem', color: '#666', margin: 0 }}>Get your ID via @userinfobot</p>
+                    </div>
+                </div>
+            </div>
+            {binanceKeys.hasTelegram && (
+                <div style={{ marginTop: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#0ecb81', fontSize: '0.85rem' }}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#0ecb81' }}></div>
+                    Telegram Notifications Active
+                </div>
+            )}
          </div>
       </div>
 

@@ -6,9 +6,11 @@ import { callOpenRouter } from './OpenRouterClient.js';
 //   + duplicate code in legacy server.js (lines 1564-1983)
 
 const AI_TYPES = {
-  confident: { desc: 'BEST for 15m Trend following / High Winrate (EMA_RSI)', strategy: 'EMA_RSI', interval: '15m' },
-  scout:     { desc: 'BEST for 5m Scalping (AI_SCOUTER)', strategy: 'AI_SCOUTER', interval: '5m' },
-  grid:      { desc: 'BEST for 1h Grid Trading boundary mapping (GRID)', strategy: 'AI_GRID', interval: '1h' },
+  confident:  { desc: 'BEST for 15m Trend following / High Winrate (EMA_RSI)', strategy: 'EMA_RSI', interval: '15m' },
+  scout:      { desc: 'BEST for 5m Scalping (AI_SCOUTER)', strategy: 'AI_SCOUTER', interval: '5m' },
+  aggressive: { desc: 'BEST for 5m Scalping (AI_SCOUTER)', strategy: 'AI_SCOUTER', interval: '5m' }, // Alias for Scout
+  grid:       { desc: 'BEST for 1h Grid Trading boundary mapping (GRID)', strategy: 'AI_GRID', interval: '1h' },
+  safe:       { desc: 'BEST for 1h Grid Trading boundary mapping (GRID)', strategy: 'AI_GRID', interval: '1h' }, // Alias for Grid
 };
 
 /**
