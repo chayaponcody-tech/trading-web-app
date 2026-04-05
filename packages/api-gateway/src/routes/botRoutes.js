@@ -18,16 +18,9 @@ export function createBotRoutes(botManager) {
    */
   r.get('/status', async (req, res) => {
     try {
-      const { getAllBots } = await import('../../../data-layer/src/repositories/botRepository.js');
-      const dbBots = await getAllBots();
-      
-      // Overlay memory state for active bots
-      const mergedBots = dbBots.map(dbBot => {
-        const memBot = botManager.bots.get(dbBot.id);
-        return memBot ? memBot : dbBot;
-      });
-
-      res.json(mergedBots);
+      // Returns all bots currently managed in memory (Active/Stopped/etc)
+      const allBots = Array.from(botManager.bots.values());
+      res.json(allBots);
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -158,15 +151,8 @@ export function createBotRoutes(botManager) {
    */
   r.get('/summary', async (req, res) => {
     try {
-      const { getAllBots } = await import('../../../data-layer/src/repositories/botRepository.js');
-      const dbBots = await getAllBots();
+      const activeBots = Array.from(botManager.bots.values());
       
-      // Merge with memory for real-time overlay
-      const activeBots = dbBots.map(dbBot => {
-        const memBot = botManager.bots.get(dbBot.id);
-        return memBot || dbBot;
-      });
-
       const summary = activeBots
         .sort((a, b) => (b.isRunning ? 1 : 0) - (a.isRunning ? 1 : 0))
         .map((bot) => ({
@@ -176,7 +162,7 @@ export function createBotRoutes(botManager) {
           netPnl: parseFloat((bot.netPnl || 0).toFixed(2)),
           unrealizedPnl: parseFloat((bot.unrealizedPnl || 0).toFixed(2)),
           totalTrades: (bot.trades || []).length,
-          winRate: bot.totalTrades > 0
+          winRate: (bot.totalTrades > 0 && bot.winCount !== undefined)
             ? parseFloat(((bot.winCount / bot.totalTrades) * 100).toFixed(1)) : 0,
           openPositions: (bot.openPositions || []).length,
           currentPrice: bot.currentPrice || 0,
