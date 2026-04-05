@@ -5,7 +5,7 @@ import {
   CheckCircle2, Trash2
 } from 'lucide-react';
 
-const API = 'http://localhost:4001';
+const API = '';
 
 interface PortfolioConfig {
   isAutonomous: boolean;

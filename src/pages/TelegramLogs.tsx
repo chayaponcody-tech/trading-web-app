@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { MessageSquare } from 'lucide-react';
 
-const API = 'http://localhost:4001';
+const API = '';
 
 interface TelegramLog {
   id: number;

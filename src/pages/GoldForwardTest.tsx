@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 
-const API = 'http://localhost:4001';
+const API = '';
 
 const LOT_SIZES = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0];
 const INTERVALS = ['5m', '15m', '1h', '4h', '1d'];

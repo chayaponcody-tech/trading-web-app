@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SymbolSelector from '../components/SymbolSelector';
 
-const API = 'http://localhost:4001';
+const API = '';
 
 const STRATEGIES = [
   { value: 'EMA', label: 'EMA Crossover (20/50)' },

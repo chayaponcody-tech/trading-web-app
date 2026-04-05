@@ -3,7 +3,7 @@ import { createChart, ColorType, LineSeries, CandlestickSeries, createSeriesMark
 import type { IChartApi, ISeriesApi, Time, SeriesMarker, ISeriesMarkersPluginApi } from 'lightweight-charts';
 import { EMA, BollingerBands, RSI, ATR } from 'technicalindicators';
 
-const API = 'http://localhost:4001';
+const API = '';
 
 const LOT_SIZES = [
   { value: 0.01, label: '0.01 (Micro)' },
