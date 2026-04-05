@@ -4,7 +4,18 @@ import { DEFAULT_BINANCE_CONFIG } from '../../../shared/config.js';
 // ─── Config Repository ────────────────────────────────────────────────────────
 
 export function loadBinanceConfig() {
-  return readJson(DATA_FILES.binanceConfig, DEFAULT_BINANCE_CONFIG);
+  const jsonConfig = readJson(DATA_FILES.binanceConfig, DEFAULT_BINANCE_CONFIG);
+  
+  // Merge with Environment Variables (Priority to .env / ENV)
+  return {
+    ...jsonConfig,
+    apiKey: process.env.BINANCE_API_KEY || jsonConfig.apiKey || '',
+    apiSecret: process.env.BINANCE_API_SECRET || jsonConfig.apiSecret || '',
+    openRouterKey: process.env.OPENROUTER_API_KEY || jsonConfig.openRouterKey || '',
+    openRouterModel: process.env.OPENROUTER_MODEL || jsonConfig.openRouterModel || 'meta-llama/llama-3.1-8b-instruct',
+    telegramToken: process.env.TELEGRAM_TOKEN || jsonConfig.telegramToken || '',
+    telegramChatId: process.env.TELEGRAM_CHAT_ID || jsonConfig.telegramChatId || ''
+  };
 }
 
 export function saveBinanceConfig(config) {
