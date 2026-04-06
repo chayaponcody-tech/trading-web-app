@@ -10,12 +10,13 @@ export function useTradingData() {
   const [tradeMemory, setTradeMemory] = useState<any[]>([]);
   const [tradeHistory, setTradeHistory] = useState<any[]>([]);
   const [fetchingHistory, setFetchingHistory] = useState(false);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [binanceKeys, setBinanceKeys] = useState<BinanceKeys>({
     apiKey: '', apiSecret: '', openRouterKey: '',
     openRouterModel: 'deepseek/deepseek-v3.2',
     hasKeys: false, hasOpenRouter: false,
   });
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'positions' | 'history' | 'groups' | 'memory' | 'tuning'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'analytics' | 'positions' | 'history' | 'groups' | 'memory' | 'tuning'>('dashboard');
   const pollRef = useRef<number | null>(null);
 
   const fetchStatus = async () => {
@@ -70,17 +71,26 @@ export function useTradingData() {
     } catch {} finally { setFetchingHistory(false); }
   };
 
+  const fetchAnalytics = async () => {
+    try {
+      const res = await fetch(`${API}/api/binance/analytics`);
+      if (res.ok) setAnalyticsData(await res.json());
+    } catch {}
+  };
+
   useEffect(() => {
     fetchStatus();
     fetchBinanceConfig();
     fetchAccount();
     if (activeTab === 'memory') fetchMemory();
     if (activeTab === 'history') fetchHistory();
+    if (activeTab === 'analytics') fetchAnalytics();
 
     pollRef.current = window.setInterval(() => {
       fetchStatus();
       fetchAccount();
       if (activeTab === 'memory') fetchMemory();
+      if (activeTab === 'analytics') fetchAnalytics();
     }, 5000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [activeTab]);
@@ -92,7 +102,8 @@ export function useTradingData() {
     tradeMemory,
     tradeHistory,
     fetchingHistory,
+    analyticsData,
     activeTab, setActiveTab,
-    fetchStatus, fetchAccount, fetchHistory, fetchMemory,
+    fetchStatus, fetchAccount, fetchHistory, fetchMemory, fetchAnalytics,
   };
 }

@@ -18,15 +18,13 @@ I have 40 top coins from Binance (24h data):
 ${JSON.stringify(tickerSummary)}
 
 TASK:
-Identify the TOP 5 most suitable coins that fit the goal perfectly based on their 24h price change and volume behavior.
-- For Grid: Look for coins with low change (-2% to +2%) but high volume (sideways).
-- For Scalp: Look for high volatility (> 5%) and extreme volume.
-- For Trend: Look for steady positive momentum (> 3%) with strong volume support.
+Identify the TOP 5 most suitable coins that fit the goal perfectly.
+For each selection, provide a brief but ANALYTICAL reason in Thai, mentioning why its volume or price behavior is attractive for the strategy.
 
 RESPONSE FORMAT (strict JSON only):
 {
   "recommendations": [
-    { "symbol": "SYMBOL", "reason": "Short catchy reason in Thai", "score": 1-100, "tag": "short-tag" },
+    { "symbol": "SYMBOL", "reason": "เหตุผลเชิงเทคนิคสั้นๆ (ภาษาไทย) เช่น 'ปริมาณการซื้อขายคงที่ที่แนวรับ 1h'", "score": 1-100, "tag": "short-tag" },
     ...
   ]
 }

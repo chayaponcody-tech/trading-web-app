@@ -33,6 +33,7 @@ export default function BotSidebar({ binanceKeys, onStart, onAIRecommend, loadin
   const [gridLayers, setGridLayers] = useState<number>(10);
 
   const handleLaunchSingle = () => {
+    const scanEntry = scanResults.find(r => r.symbol === symbol);
     onStart({
       symbol,
       interval: intervalTime,
@@ -48,6 +49,7 @@ export default function BotSidebar({ binanceKeys, onStart, onAIRecommend, loadin
       trailingStopPct,
       maxDrawdownPct,
       aiModel: binanceKeys.openRouterModel,
+      aiReason: scanEntry?.reason || null,
       gridUpper: gridUpper > 0 ? gridUpper : null,
       gridLower: gridLower > 0 ? gridLower : null,
       gridLayers: gridLayers
@@ -90,12 +92,12 @@ export default function BotSidebar({ binanceKeys, onStart, onAIRecommend, loadin
   }
 
   return (
-    <div className="glass-panel" style={{ width: '220px', flexShrink: 0, padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem', overflowY: 'auto', height: '100%', borderLeft: '4px solid #faad14' }}>
-      <div style={{ marginBottom: '0.5rem' }}>
-        <h4 className="m-0" style={{ fontSize: '1rem', color: '#faad14' }}>🎯 SINGLE BOT SETUP</h4>
+    <div className="glass-panel" style={{ width: '200px', flexShrink: 0, padding: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.6rem', overflowY: 'auto', height: '100%', borderLeft: '4px solid #faad14' }}>
+      <div style={{ marginBottom: '0.2rem' }}>
+        <h4 className="m-0" style={{ fontSize: '0.85rem', color: '#faad14' }}>🎯 SINGLE BOT SETUP</h4>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
         {/* Target & Size Section */}
         <div style={{ padding: '0.8rem', background: 'rgba(255,173,20,0.03)', borderRadius: '12px', border: '1px solid rgba(250,173,20,0.1)' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.8rem' }}>
@@ -120,23 +122,40 @@ export default function BotSidebar({ binanceKeys, onStart, onAIRecommend, loadin
           <SymbolSelector value={symbol} onSelect={setSymbol} compact />
 
           {scanResults.length > 0 && (
-            <div style={{ marginTop: '0.8rem', display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-              <div style={{ width: '100%', fontSize: '0.55rem', color: '#888', marginBottom: '0.1rem', textTransform: 'uppercase' }}>Top Hunt Results:</div>
-              {scanResults.map(r => (
-                <button
-                  key={r.symbol}
-                  onClick={() => setSymbol(r.symbol)}
-                  style={{
-                    background: r.symbol === symbol ? '#faad1422' : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${r.symbol === symbol ? '#faad14' : 'rgba(255,255,255,0.1)'}`,
-                    color: r.symbol === symbol ? '#faad14' : '#ccc',
-                    borderRadius: '4px', padding: '0.2rem 0.4rem', fontSize: '0.6rem', cursor: 'pointer', display: 'flex', gap: '0.3rem', alignItems: 'center'
-                  }}
-                >
-                  <span>{r.tag === '穩定' ? '' : r.tag} {r.symbol.replace('USDT', '')}</span>
-                  <span style={{ opacity: 0.6, fontSize: '0.5rem' }}>{r.change !== undefined && r.change !== null ? `${r.change > 0 ? '+' : ''}${r.change.toFixed(1)}%` : ''}</span>
-                </button>
-              ))}
+            <div style={{ marginTop: '0.8rem' }}>
+              <div style={{ fontSize: '0.55rem', color: '#888', marginBottom: '0.3rem', textTransform: 'uppercase', fontWeight: 'bold' }}>AI Market Scan Results:</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.8rem' }}>
+                {scanResults.map(r => (
+                  <button
+                    key={r.symbol}
+                    onClick={() => setSymbol(r.symbol)}
+                    style={{
+                      background: r.symbol === symbol ? '#faad1422' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${r.symbol === symbol ? '#faad14' : 'rgba(255,255,255,0.1)'}`,
+                      color: r.symbol === symbol ? '#faad14' : '#ccc',
+                      borderRadius: '4px', padding: '0.2rem 0.4rem', fontSize: '0.6rem', cursor: 'pointer', display: 'flex', gap: '0.3rem', alignItems: 'center'
+                    }}
+                  >
+                    <span>{r.tag === '穩定' ? '' : r.tag} {r.symbol.replace('USDT', '')}</span>
+                  </button>
+                ))}
+              </div>
+              
+              {/* Specific Reason for selected symbol if it matches a scan result */}
+              {scanResults.find(r => r.symbol === symbol)?.reason && (
+                <div style={{ 
+                  fontSize: '0.65rem', 
+                  color: '#faad14', 
+                  background: 'rgba(250,173,20,0.08)', 
+                  padding: '0.5rem', 
+                  borderRadius: '6px',
+                  borderLeft: '2px solid #faad14',
+                  lineHeight: '1.4',
+                  fontStyle: 'italic'
+                }}>
+                  🎯 {scanResults.find(r => r.symbol === symbol)?.reason}
+                </div>
+              )}
             </div>
           )}
 

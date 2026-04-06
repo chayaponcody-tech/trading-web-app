@@ -208,6 +208,15 @@ export function createBinanceRoutes(botManager, binanceConfig) {
     } catch (e) { next(e); }
   });
 
+  r.get('/klines', async (req, res, next) => {
+    try {
+      const { symbol, interval = '1h', limit = 500 } = req.query;
+      const svc = getService();
+      const klines = await svc.getKlines(symbol, interval, parseInt(limit));
+      res.json(klines);
+    } catch (e) { next(e); }
+  });
+
   return r;
 }
 

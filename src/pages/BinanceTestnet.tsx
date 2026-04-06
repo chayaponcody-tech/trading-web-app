@@ -142,22 +142,30 @@ const PerformanceChart = ({ data }: { data: any[] }) => {
       bottomColor: 'rgba(250, 173, 20, 0.0)',
     });
 
-    const chartData = data.map((d) => {
-      let timeValue: any = d.time;
-      if (timeValue === 'Initial') {
-         timeValue = Math.floor(Date.now() / 1000) - 86400 * 7; // Default 1 week ago
-      } else {
-        timeValue = Math.floor(new Date(timeValue).getTime() / 1000);
-      }
-      return { time: timeValue as any, value: d.value };
-    }).sort((a, b) => a.time - b.time);
+    const chartData = data
+      .map((d) => {
+        let timeValue: any = d.time;
+        if (timeValue === 'Initial') {
+           timeValue = Math.floor(Date.now() / 1000) - 86400 * 7; // Default 1 week ago
+        } else {
+          const parsed = new Date(timeValue).getTime();
+          timeValue = isNaN(parsed) ? null : Math.floor(parsed / 1000);
+        }
+        return { time: timeValue, value: d.value };
+      })
+      .filter(d => d.time !== null)
+      .sort((a, b) => a.time - b.time);
 
-    // Remove duplicates
+    // Remove duplicates and ensure strictly increasing time
     const uniqueData = chartData.filter((v, i, a) => i === 0 || v.time > a[i - 1].time);
 
     if (uniqueData.length > 0) {
-        series.setData(uniqueData);
-        chart.timeScale().fitContent();
+        try {
+            series.setData(uniqueData as any);
+            chart.timeScale().fitContent();
+        } catch (err) {
+            console.error('Lightweight Charts Error:', err);
+        }
     }
 
     const handleResize = () => {
@@ -926,6 +934,16 @@ export default function BinanceTestnet() {
             CONTROL (BOTS)
           </button>
           <button 
+            onClick={() => setActiveTab('analytics')} 
+            style={{ 
+              padding: '1rem 1.25rem', background: 'transparent', border: 'none', 
+              color: activeTab === 'analytics' ? '#faad14' : 'var(--text-muted)', 
+              fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem',
+              borderBottom: activeTab === 'analytics' ? '3px solid #faad14' : '3px solid transparent'
+            }}>
+            ANALYTICS 📊
+          </button>
+          <button 
             onClick={() => setActiveTab('positions')} 
             style={{ 
               padding: '1rem 1.25rem', background: 'transparent', border: 'none', 
@@ -970,16 +988,6 @@ export default function BinanceTestnet() {
               borderBottom: activeTab === 'memory' ? '3px solid #faad14' : '3px solid transparent'
             }}>
             AI MEMORY 🧬
-          </button>
-          <button 
-            onClick={() => setActiveTab('analytics')} 
-            style={{ 
-              padding: '1rem 1.25rem', background: 'transparent', border: 'none', 
-              color: activeTab === 'analytics' ? '#faad14' : 'var(--text-muted)', 
-              fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem',
-              borderBottom: activeTab === 'analytics' ? '3px solid #faad14' : '3px solid transparent'
-            }}>
-            ANALYTICS 📊
           </button>
         </div>
 

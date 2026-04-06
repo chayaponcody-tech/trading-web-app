@@ -7,9 +7,10 @@ interface Props {
   bots: Bot[];
   onManualClose: (symbol: string, type: string, qty: number) => void;
   onRefresh: () => void;
+  onViewChart: (symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number) => void;
 }
 
-export default function PositionsTab({ activePositions, bots, onManualClose, onRefresh }: Props) {
+export default function PositionsTab({ activePositions, bots, onManualClose, onRefresh, onViewChart }: Props) {
   const [posSortBy, setPosSortBy] = useState<'symbol' | 'pnl' | 'roe'>('symbol');
 
   let sorted = [...activePositions];
@@ -55,6 +56,7 @@ export default function PositionsTab({ activePositions, bots, onManualClose, onR
               <th style={{ padding: '1rem' }}>Entry / Mark</th>
               <th style={{ padding: '1rem' }}>Strategy</th>
               <th style={{ padding: '1rem' }}>AI Targets</th>
+              <th style={{ padding: '1rem' }}>Entry Reason</th>
               <th style={{ padding: '1rem' }}>ROE %</th>
               <th style={{ padding: '1rem' }}>Unrealized PNL</th>
               <th style={{ padding: '1rem', textAlign: 'right' }}>Actions</th>
@@ -62,7 +64,7 @@ export default function PositionsTab({ activePositions, bots, onManualClose, onR
           </thead>
           <tbody>
             {sorted.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: '6rem', textAlign: 'center', color: 'var(--text-muted)' }}>No active positions.</td></tr>
+              <tr><td colSpan={9} style={{ padding: '6rem', textAlign: 'center', color: 'var(--text-muted)' }}>No active positions.</td></tr>
             ) : sorted.map((p: any, i: number) => {
               const amt = parseFloat(p.positionAmt);
               const side = amt > 0 ? 'LONG' : 'SHORT';
@@ -79,10 +81,34 @@ export default function PositionsTab({ activePositions, bots, onManualClose, onR
               const tpPrice = tpPct > 0 ? (side === 'LONG' ? entryPrice * (1 + tpPct/100) : entryPrice * (1 - tpPct/100)) : 0;
               const slPrice = slPct > 0 ? (side === 'LONG' ? entryPrice * (1 - slPct/100) : entryPrice * (1 + slPct/100)) : 0;
 
+              const botPos = linkedBot?.openPositions?.find((op: any) => op.type === side);
+              // Prioritize the deep analytical reason (Thai explanation) over the technical function name
+              const analyticalReason = linkedBot?.config?.aiReason || linkedBot?.aiReason;
+              const technicalReason = botPos?.entryReason || 'Technical Analysis Entry';
+              const entryReason = analyticalReason ? analyticalReason : technicalReason;
+
               return (
                 <tr key={i} style={{ borderBottom: '1px solid var(--border-color)22' }}>
                   <td style={{ padding: '1rem' }}>
-                    <div style={{ fontWeight: 'bold' }}>{p.symbol}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                       <div style={{ fontWeight: 'bold' }}>{p.symbol}</div>
+                       <button 
+                         title="View Chart"
+                         onClick={() => onViewChart(
+                            p.symbol, 
+                            linkedBot?.config?.interval || '1h', 
+                            entryPrice, 
+                            botPos?.entryTime || linkedBot?.startedAt || Date.now(),
+                            side,
+                            entryReason,
+                            linkedBot?.config?.strategy || 'MANUAL',
+                            linkedBot?.config?.gridUpper,
+                            linkedBot?.config?.gridLower
+                         )}
+                         style={{ background: 'rgba(250,173,20,0.1)', border: 'none', color: '#faad14', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.65rem' }}>
+                         📈
+                       </button>
+                    </div>
                     <div style={{ fontSize: '0.65rem' }}>
                       <span style={{ color: side === 'LONG' ? '#0ecb81' : '#f6465d' }}>{side}</span> · {p.leverage}x
                     </div>
@@ -101,6 +127,11 @@ export default function PositionsTab({ activePositions, bots, onManualClose, onR
                     {tpPrice > 0 && <div style={{ fontSize: '0.75rem', color: '#0ecb81', fontWeight: 'bold' }}>TP: {formatPrice(tpPrice)}</div>}
                     {slPrice > 0 && <div style={{ fontSize: '0.75rem', color: '#f6465d', fontWeight: 'bold' }}>SL: {formatPrice(slPrice)}</div>}
                     {!tpPrice && !slPrice && <span style={{ opacity: 0.3 }}>-</span>}
+                  </td>
+                  <td style={{ padding: '1rem' }}>
+                    <div style={{ fontSize: '0.65rem', color: '#faad14', fontStyle: 'italic', maxWidth: '180px', lineHeight: '1.4' }}>
+                       {entryReason}
+                    </div>
                   </td>
                   <td style={{ padding: '1rem', color: roe >= 0 ? '#0ecb81' : '#f6465d' }}>
                     <span style={{ fontWeight: 'bold', fontSize: '1rem' }}>{roe.toFixed(2)}%</span>

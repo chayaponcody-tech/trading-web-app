@@ -87,16 +87,16 @@ RESPONSE FORMAT (strict valid JSON):
 {
   "confident": {
     "name": "🛡️ Confident Fleet",
-    "description": "อธิบายเป็นภาษาไทย",
-    "coins": [{ "symbol": "BTCUSDT", "strategy": "EMA_RSI", "interval": "15m", "tp": 2.0, "sl": 1.0, "leverage": 10 }]
+    "description": "อธิบายเชิงกลยุทธ์ภาพรวม (ภาษาไทย)",
+    "coins": [{ "symbol": "BTCUSDT", "strategy": "EMA_RSI", "interval": "15m", "tp": 2.0, "sl": 1.0, "leverage": 10, "reason": "อธิบายเหตุผลทางเทคนิครายตัว (ภาษาไทย)" }]
   },
   "scout": {
     "name": "🏹 Scouting Fleet",
-    "description": "อธิบายเป็นภาษาไทย",
-    "coins": [{ "symbol": "DOGEUSDT", "strategy": "AI_SCOUTER", "interval": "5m", "tp": 1.5, "sl": 0.5, "leverage": 20 }]
+    "description": "อธิบายเชิงกลยุทธ์ภาพรวม (ภาษาไทย)",
+    "coins": [{ "symbol": "DOGEUSDT", "strategy": "AI_SCOUTER", "interval": "5m", "tp": 1.5, "sl": 0.5, "leverage": 20, "reason": "อธิบายเหตุผลทางเทคนิครายตัว (ภาษาไทย)" }]
   }
 }
-Rules: "coins" arrays MUST have exactly ${count} objects. NO MARKDOWN.`;
+Rules: "coins" arrays MUST have exactly ${count} objects. Each coin MUST have a specific "reason" why it was chosen. NO MARKDOWN.`;
 
   return callOpenRouter(prompt, apiKey, model);
 }

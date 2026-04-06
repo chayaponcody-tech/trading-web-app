@@ -353,13 +353,13 @@ export default function Portfolio() {
                <Cpu size={14} color="#00d1ff" /> Autonomous Portfolio Fleet 
                <span style={{ fontSize: '0.7rem', textTransform: 'none', fontWeight: 'normal', color: '#666' }}> (Managed by Auto-Pilot)</span>
             </h4>
-            {bots.filter(b => b.aiReason?.includes('Portfolio') || b.aiReason?.includes('Autonomous')).length === 0 ? (
+            {bots.filter(b => b.config?.managedBy === 'auto-pilot' || b.managedBy === 'auto-pilot' || b.aiReason?.includes('Portfolio') || b.aiReason?.includes('Autonomous')).length === 0 ? (
               <div className="text-xs text-muted italic p-3 border rounded" style={{ borderStyle: 'dashed', borderColor: 'rgba(255,255,255,0.05)' }}>
                 No active autonomous bots yet.
               </div>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
-                {bots.filter(b => b.aiReason?.includes('Portfolio') || b.aiReason?.includes('Autonomous')).map((bot) => (
+                {bots.filter(b => b.config?.managedBy === 'auto-pilot' || b.managedBy === 'auto-pilot' || b.aiReason?.includes('Portfolio') || b.aiReason?.includes('Autonomous')).map((bot) => (
                   <div key={bot.id} className="hover-card border-primary" style={{ padding: '1rem', background: 'rgba(0, 209, 255, 0.03)', borderRadius: '10px' }}>
                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <div>
@@ -394,7 +394,7 @@ export default function Portfolio() {
                <span style={{ fontSize: '0.7rem', textTransform: 'none', fontWeight: 'normal', color: '#444' }}> (Not managed by Auto-Pilot)</span>
             </h4>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '1rem' }}>
-              {bots.filter(b => !(b.aiReason?.includes('Portfolio') || b.aiReason?.includes('Autonomous'))).map((bot) => (
+              {bots.filter(b => !(b.config?.managedBy === 'auto-pilot' || b.managedBy === 'auto-pilot' || b.aiReason?.includes('Portfolio') || b.aiReason?.includes('Autonomous'))).map((bot) => (
                 <div key={bot.id} className="hover-card" style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.05)' }}>
                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <div>

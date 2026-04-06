@@ -12,9 +12,10 @@ interface Props {
   onOptimize: (id: string) => void;
   isGrid?: boolean;
   viewMode?: 'grid' | 'list' | 'mini';
+  onViewChart?: (symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number) => void;
 }
 
-export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onToggle, onReview, onOptimize, viewMode }: Props) {
+export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onToggle, onReview, onOptimize, viewMode, onViewChart }: Props) {
 
   const [editingInterval, setEditingInterval] = useState<number>(bot.config.aiCheckInterval || 0);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -43,6 +44,11 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', width: '120px' }}>
           <span style={{ color: bot.isRunning ? '#0ecb81' : '#555', fontSize: '0.5rem', animation: bot.isRunning ? 'pulse 2s infinite' : 'none' }}>●</span>
           <span style={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#fff' }}>{bot.config.symbol}</span>
+          {onViewChart && (
+            <button 
+              onClick={() => onViewChart(bot.config.symbol, bot.config.interval, bot.openPositions?.[0]?.entryPrice || bot.currentPrice, bot.openPositions?.[0]?.entryTime || bot.startedAt || Date.now(), bot.openPositions?.[0]?.type || 'LONG', bot.openPositions?.[0]?.entryReason || bot.config.aiReason || bot.aiReason || 'Manual Technical Entry', bot.config.strategy, bot.config.gridUpper, bot.config.gridLower)}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.7rem' }}>📈</button>
+          )}
           <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>{bot.config.strategy === 'AI_GRID_SCALP' ? '⚡' : bot.config.strategy === 'AI_GRID_SWING' ? '🏛️' : '🤖'}</span>
         </div>
 
@@ -89,6 +95,15 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <span style={{ color: bot.isRunning ? '#0ecb81' : '#888', fontSize: '0.6rem' }}>●</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{bot.config.symbol}</div>
+            {onViewChart && (
+              <button 
+                onClick={() => onViewChart(bot.config.symbol, bot.config.interval, bot.openPositions?.[0]?.entryPrice || bot.currentPrice, bot.openPositions?.[0]?.entryTime || bot.startedAt || Date.now(), bot.openPositions?.[0]?.type || 'LONG', bot.openPositions?.[0]?.entryReason || bot.config.aiReason || bot.aiReason || 'Manual Technical Entry', bot.config.strategy, bot.config.gridUpper, bot.config.gridLower)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1rem', float: 'right' }} 
+                title="View Chart"
+              >
+                📈
+              </button>
+            )}
           </div>
           <div style={{ display: 'flex', gap: '0.3rem', marginTop: '0.1rem' }}>
             <span style={{ 
@@ -176,9 +191,32 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
       </div>
 
       {bot.aiReason && (
-        <div style={{ background: 'rgba(250, 173, 20, 0.05)', padding: '0.8rem', borderRadius: '6px', fontSize: '0.75rem', color: '#ddd', fontStyle: 'italic', borderLeft: '3px solid #faad14', lineHeight: '1.4' }}>
-          <div style={{ fontSize: '0.64rem', color: '#faad14', marginBottom: '0.3rem', fontWeight: 'bold', textTransform: 'uppercase' }}>🧠 STARTUP REASON</div>
-          {bot.aiReason.slice(0, 200)}{bot.aiReason.length > 200 ? '...' : ''}
+        <div style={{ 
+          background: 'linear-gradient(135deg, rgba(250, 173, 20, 0.08) 0%, rgba(250, 173, 20, 0.02) 100%)', 
+          padding: '1rem', 
+          borderRadius: '8px', 
+          fontSize: '0.8rem', 
+          color: '#eee', 
+          border: '1px solid rgba(250, 173, 20, 0.2)',
+          lineHeight: '1.5',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+        }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            marginBottom: '0.6rem',
+            borderBottom: '1px solid rgba(250, 173, 20, 0.1)',
+            paddingBottom: '0.4rem'
+          }}>
+            <span style={{ fontSize: '0.65rem', color: '#faad14', fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>
+              🧠 Deep Market Selection Logic
+            </span>
+            <span style={{ fontSize: '0.6rem', color: '#888', background: 'rgba(255,255,255,0.05)', padding: '2px 6px', borderRadius: '4px' }}>
+              {bot.lastAiModel || bot.config.aiModel || 'Smart Core'}
+            </span>
+          </div>
+          <div style={{ whiteSpace: 'pre-wrap' }}>{bot.aiReason}</div>
         </div>
       )}
 
@@ -269,7 +307,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
           )}
 
           {activeTab === 'positions' && (
-            <BotPositionList positions={bot.openPositions || []} currentPrice={bot.currentPrice || 0} />
+            <BotPositionList positions={bot.openPositions || []} currentPrice={bot.currentPrice || 0} leverage={bot.config.leverage || 1} />
           )}
 
           {activeTab === 'ai' && <AiLogList logs={bot.aiHistory || []} />}
@@ -320,19 +358,21 @@ function TradeList({ trades }: { trades: any[] }) {
   );
 }
 
-function BotPositionList({ positions, currentPrice }: { positions: any[], currentPrice: number }) {
+function BotPositionList({ positions, currentPrice, leverage = 1 }: { positions: any[], currentPrice: number, leverage?: number }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
        {positions.length === 0 ? (
          <div style={{ fontSize: '0.75rem', color: '#555', textAlign: 'center', padding: '1rem' }}>No active layers found.</div>
        ) : (
          positions.map((p, i) => {
-           const pnlPct = (p.type === 'LONG' || p.type === 'BUY'
+           const assetRoi = (p.type === 'LONG' || p.type === 'BUY'
               ? (currentPrice - p.entryPrice) / p.entryPrice
-              : (p.entryPrice - currentPrice) / p.entryPrice) * 100;
+              : (p.entryPrice - currentPrice) / p.entryPrice);
+           
+           const roePct = assetRoi * leverage * 100;
            
            return (
-             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', padding: '0.7rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', borderLeft: `3px solid ${pnlPct >= 0 ? '#0ecb81' : '#f6465d'}` }}>
+             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', padding: '0.7rem', background: 'rgba(255,255,255,0.03)', borderRadius: '6px', borderLeft: `3px solid ${roePct >= 0 ? '#0ecb81' : '#f6465d'}` }}>
                 <div>
                    <div style={{ fontWeight: 'bold' }}>
                      <span style={{ color: p.type === 'LONG' || p.type === 'BUY' ? '#0ecb81' : '#f6465d' }}>{p.type}</span> · Size: {p.quantity}
@@ -340,10 +380,10 @@ function BotPositionList({ positions, currentPrice }: { positions: any[], curren
                    <div style={{ fontSize: '0.65rem', color: '#888', marginTop: '0.2rem' }}>Entry: ${p.entryPrice?.toFixed(4)}</div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                   <div style={{ color: pnlPct >= 0 ? '#0ecb81' : '#f6465d', fontWeight: 'bold', fontSize: '0.8rem' }}>
-                     {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
+                   <div style={{ color: roePct >= 0 ? '#0ecb81' : '#f6465d', fontWeight: 'bold', fontSize: '0.8rem' }}>
+                     {roePct >= 0 ? '+' : ''}{roePct.toFixed(2)}%
                    </div>
-                   <div style={{ fontSize: '0.6rem', color: '#666' }}>Active Layer</div>
+                   <div style={{ fontSize: '0.6rem', color: roePct >= 0 ? '#0ecb81' : '#f6465d', fontWeight: 'bold' }}>ROE %</div>
                 </div>
              </div>
            );

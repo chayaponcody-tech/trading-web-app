@@ -7,17 +7,25 @@ import PositionsTab from './components/PositionsTab';
 import TuningLogs from './components/TuningLogs';
 import BotSidebar from './components/BotSidebar';
 import BotCard from './components/BotCard';
+import AnalyticsTab from './components/AnalyticsTab';
+import PositionChartModal from './components/PositionChartModal';
 import { API, type Bot } from './types';
 
 export default function BinanceLive() {
   const {
     bots, accountInfo, binanceKeys,
     tradeMemory, tradeHistory, fetchingHistory,
+    analyticsData,
     activeTab, setActiveTab,
-    fetchStatus, fetchAccount, fetchHistory,
+    fetchStatus, fetchAccount, fetchHistory, fetchMemory, fetchAnalytics,
   } = useTradingData();
 
-  // Search & Filter States
+  // Modal States
+  const [chartData, setChartData] = useState<{ symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number } | null>(null);
+
+  const handleViewChart = (symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number) => {
+    setChartData({ symbol, interval, price, entryTime, type, reason, strategy, gridUpper, gridLower });
+  };
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'pnl' | 'symbol' | 'started' | 'none'>('pnl');
   const [groupBy, setGroupBy] = useState<'symbol' | 'strategy' | 'model' | 'aiType' | 'none'>('aiType');
@@ -229,6 +237,7 @@ export default function BinanceLive() {
       gridLower: aiRecommendation.grid_lower,
       positionSizeUSDT: positionSizeUSDT, // CRITICAL FIX: Use shared capital
       entry_steps: aiRecommendation.entry_steps,
+      managedBy: 'auto-pilot'
     });
     setShowAIModal(false);
   };
@@ -247,7 +256,7 @@ export default function BinanceLive() {
   // ─── Render Grouped ───────────────────────────────────────────────────────────
   const renderBotList = (list: Bot[]) => (
     <div style={
-      viewMode === 'grid' ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(420px, 1fr))', gap: '1rem' } : 
+      viewMode === 'grid' ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '1rem' } : 
       { display: 'flex', flexDirection: 'column', gap: viewMode === 'mini' ? '0.4rem' : '0.75rem' }
     }>
       {list.map(bot => (
@@ -257,6 +266,7 @@ export default function BinanceLive() {
           onReview={handleReviewMistakes} onOptimize={handleOptimize} 
           expanded={expandedBots.includes(bot.id)} 
           onToggle={() => handleToggleHistory(bot.id)} 
+          onViewChart={handleViewChart}
           viewMode={viewMode}
           isGrid={viewMode === 'grid'} 
         />
@@ -297,7 +307,7 @@ export default function BinanceLive() {
         title={sidebarMode === 'full' ? 'Mini View' : sidebarMode === 'mini' ? 'Hide All' : 'Show Full'}
         style={{
           position: 'absolute',
-          left: sidebarMode === 'full' ? '205px' : sidebarMode === 'mini' ? '55px' : '5px',
+          left: sidebarMode === 'full' ? '185px' : sidebarMode === 'mini' ? '55px' : '5px',
           top: '10px',
           zIndex: 1000,
           background: '#faad14',
@@ -319,7 +329,7 @@ export default function BinanceLive() {
       </button>
 
       <div style={{ 
-        width: sidebarMode === 'full' ? '220px' : (sidebarMode === 'mini' ? '70px' : '0'), 
+        width: sidebarMode === 'full' ? '200px' : (sidebarMode === 'mini' ? '70px' : '0'), 
         overflow: 'hidden', 
         transition: 'width 0.3s ease',
         flexShrink: 0 
@@ -345,10 +355,10 @@ export default function BinanceLive() {
         transition: 'padding 0.3s ease' 
       }}>
 
-        <div className="glass-panel" style={{ padding: '1.25rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: '4px solid #faad14' }}>
+        <div className="glass-panel" style={{ padding: '0.85rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderLeft: '4px solid #faad14' }}>
           <div>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.4rem' }}>Futures Net Equity</div>
-            <div style={{ fontSize: '2rem', fontWeight: 'bold' }}>${parseFloat(accountInfo?.totalMarginBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Futures Net Equity</div>
+            <div style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>${parseFloat(accountInfo?.totalMarginBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
           </div>
           <div style={{ display: 'flex', gap: '2.5rem' }}>
             <StatLarge label="Total Unrealized" value={`$${parseFloat(accountInfo?.totalUnrealizedProfit || 0).toFixed(2)}`} color={parseFloat(accountInfo?.totalUnrealizedProfit || 0) >= 0 ? '#0ecb81' : '#f6465d'} />
@@ -358,19 +368,20 @@ export default function BinanceLive() {
         </div>
 
         <div style={{ display: 'flex', gap: '0.4rem', borderBottom: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.1)', padding: '0 0.5rem' }}>
-          {(['dashboard', 'positions', 'history', 'tuning', 'memory'] as const).map(tab => (
+          {(['dashboard', 'analytics', 'positions', 'history', 'tuning', 'memory'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               style={{
-                padding: '1rem 1.25rem', background: 'transparent', border: 'none',
+                padding: '0.65rem 1rem', background: 'transparent', border: 'none',
                 color: activeTab === tab ? '#faad14' : 'var(--text-muted)',
-                fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85rem',
+                fontWeight: 'bold', cursor: 'pointer', fontSize: '0.8rem',
                 borderBottom: activeTab === tab ? '3px solid #faad14' : '3px solid transparent',
               }}
             >
               {tab === 'dashboard' ? 'CONTROL (BOTS)' :
                tab === 'positions' ? `ACTIVE 💸 (${activePositions.length})` :
+               tab === 'analytics' ? 'ANALYTICS 📊' :
                tab === 'history' ? 'CLOSED HISTORY 📜' :
                tab === 'tuning' ? 'AI TUNING 🧠' :
                'AI MEMORY 🧬'}
@@ -441,10 +452,26 @@ export default function BinanceLive() {
           </>
         )}
 
-        {activeTab === 'positions' && <PositionsTab activePositions={activePositions} bots={bots} onManualClose={handleManualClose} onRefresh={fetchAccount} />}
+        {activeTab === 'positions' && <PositionsTab activePositions={activePositions} bots={bots} onManualClose={handleManualClose} onRefresh={fetchAccount} onViewChart={handleViewChart} />}
+        {activeTab === 'analytics' && <AnalyticsTab analyticsData={analyticsData} />}
         {activeTab === 'history' && <HistoryTab tradeHistory={tradeHistory} fetchingHistory={fetchingHistory} fetchHistory={fetchHistory} />}
         {activeTab === 'tuning' && <TuningLogs />}
         {activeTab === 'memory' && <MemoryTab tradeMemory={tradeMemory} />}
+
+        {chartData && (
+          <PositionChartModal 
+            symbol={chartData.symbol}
+            interval={chartData.interval}
+            entryPrice={chartData.price}
+            entryTime={chartData.entryTime}
+            type={chartData.type}
+            reason={chartData.reason}
+            strategy={chartData.strategy}
+            gridUpper={chartData.gridUpper}
+            gridLower={chartData.gridLower}
+            onClose={() => setChartData(null)} 
+          />
+        )}
       </div>
 
       {/* Modals */}
