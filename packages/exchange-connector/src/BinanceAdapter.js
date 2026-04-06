@@ -3,7 +3,11 @@ import https from 'https';
 import querystring from 'querystring';
 import { BaseExchange } from './BaseExchange.js';
 
-const FUTURES_BASE_URL = 'https://testnet.binancefuture.com';
+const TESTNET_URL = 'https://testnet.binancefuture.com';
+const LIVE_URL = 'https://fapi.binance.com';
+
+// Select BASE URL based on environment or default to Testnet
+const BASE_URL = process.env.BINANCE_USE_TESTNET === 'false' ? LIVE_URL : TESTNET_URL;
 
 // ─── Binance Testnet Futures Adapter ─────────────────────────────────────────
 // Implements BaseExchange for Binance USDT-M Futures Testnet.
@@ -28,7 +32,7 @@ export class BinanceAdapter extends BaseExchange {
           .update(query)
           .digest('hex');
 
-        const url = `${FUTURES_BASE_URL}${path}?${query}&signature=${signature}`;
+        const url = `${BASE_URL}${path}?${query}&signature=${signature}`;
         const options = {
           method,
           headers: {
@@ -71,7 +75,7 @@ export class BinanceAdapter extends BaseExchange {
     return new Promise((resolve, reject) => {
       const exec = () => {
         const query = querystring.stringify(params);
-        const url = `${FUTURES_BASE_URL}${path}${query ? '?' + query : ''}`;
+        const url = `${BASE_URL}${path}${query ? '?' + query : ''}`;
         https.get(url, (res) => {
           let body = '';
           res.on('data', (chunk) => (body += chunk));

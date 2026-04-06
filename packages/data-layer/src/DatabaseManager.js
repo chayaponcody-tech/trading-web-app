@@ -84,6 +84,18 @@ export function initDb() {
         message TEXT, 
         recordedAt DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE TABLE IF NOT EXISTS trade_mistakes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        botId TEXT,
+        symbol TEXT,
+        strategy TEXT,
+        entryPrice REAL,
+        exitPrice REAL,
+        pnl REAL,
+        marketContext TEXT,
+        aiLesson TEXT,
+        recordedAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     // --- MIGRATIONS ---

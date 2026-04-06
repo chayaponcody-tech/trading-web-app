@@ -10,9 +10,10 @@ import { callOpenRouter } from './OpenRouterClient.js';
  * @param {number} currPrice
  * @param {string} apiKey
  * @param {string} model
+ * @param {Array} pastMistakes - Array of recent trade mistakes for this symbol
  * @returns {Promise<{approved: boolean, reason: string}>}
  */
-export async function reflect(bot, signal, currPrice, apiKey, model) {
+export async function reflect(bot, signal, currPrice, apiKey, model, pastMistakes = []) {
   if (!apiKey) return { approved: true, reason: 'No API key — auto-approved' };
 
   const { symbol, strategy, interval } = bot.config;
@@ -23,10 +24,15 @@ Current price: ${currPrice}.
 Based on market context (volatility, trend, chop), should we execute this ${signal} trade?
 Approve only for high-probability setups. Reject for false breakouts or choppy markets.
 
+PAST MISTAKES (DO NOT REPEAT THESE ERRORS):
+${pastMistakes.length > 0 
+  ? pastMistakes.map(m => `- [${m.strategy}] At ${m.entryPrice}: ${m.aiLesson}`).join('\n')
+  : 'None recorded yet. Be careful.'}
+
 RESPONSE FORMAT (JSON only):
 {
   "approved": true,
-  "reason": "สรุปเหตุผลสั้นๆ เป็นภาษาไทย"
+  "reason": "สรุปเหตุผลสั้นๆ เป็นภาษาไทย (ระบุด้วยว่าเช็คจากบทเรียนเก่าแล้วหรือไม่)"
 }`;
 
   try {

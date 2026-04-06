@@ -1,6 +1,9 @@
 // ─── Data Layer — Public API ──────────────────────────────────────────────────
 export * from './repositories/botRepository.js';
-export * from './repositories/tradeRepository.js';
+export { 
+  getTradeMemory, appendTrade, getAllTradesFromBots, 
+  saveMistake, getRecentMistakes 
+} from './repositories/tradeRepository.js';
 export * from './repositories/configRepository.js';
 export * from './repositories/walletRepository.js';
 export * from './repositories/telegramRepository.js';

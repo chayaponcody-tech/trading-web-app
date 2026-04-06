@@ -16,15 +16,20 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# 2. BACKEND RUNTIME: สำหรับรัน Node.js API
+# 2. BACKEND RUNTIME: สำหรับรัน Node.js API (Reduces Image size)
 FROM node:23-alpine AS backend-runtime
-RUN apk add --no-cache python3 make g++ 
 WORKDIR /app
-COPY --from=builder /app /app
+# คัดเลือกเฉพาะสิ่งที่บอทต้องใช้จริงๆ (Pruning node_modules)
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/packages ./packages
+# ลบ dev dependencies ออกเพื่อแอปขนาดเล็กลง (Optional if npm install handled it)
+RUN npm prune --omit=dev --foreground-scripts=false
+
 ENV PORT=4001
 ENV NODE_ENV=production
 EXPOSE 4001
-CMD ["npm", "run", "backend"]
+CMD ["node", "packages/api-gateway/src/server.js"]
 
 # 3. FRONTEND RUNTIME: สำหรับรัน Nginx เสิร์ฟไฟล์คงที่ (Static)
 FROM nginx:alpine AS frontend-runtime

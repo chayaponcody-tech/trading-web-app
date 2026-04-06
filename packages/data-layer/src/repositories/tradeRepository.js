@@ -81,3 +81,43 @@ export function getAllTradesFromBots(botsMap) {
   }
   return all.sort((a, b) => new Date(b.exitTime || 0) - new Date(a.exitTime || 0));
 }
+
+// ─── AI Mistakes Repository ──────────────────────────────────────────────────
+
+export function saveMistake(mistake) {
+  if (useSqlite) {
+    try {
+      db.prepare(`
+        INSERT INTO trade_mistakes (botId, symbol, strategy, entryPrice, exitPrice, pnl, marketContext, aiLesson)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        mistake.botId,
+        mistake.symbol,
+        mistake.strategy,
+        mistake.entryPrice || 0,
+        mistake.exitPrice || 0,
+        mistake.pnl || 0,
+        mistake.marketContext || '',
+        mistake.aiLesson || ''
+      );
+      return true;
+    } catch (e) {
+      console.error('[TradeRepo] saveMistake SQL error:', e.message);
+      return false;
+    }
+  }
+  return false;
+}
+
+export function getRecentMistakes(symbol, limit = 5) {
+  if (useSqlite) {
+    try {
+      return db.prepare(`
+        SELECT * FROM trade_mistakes 
+        WHERE (symbol = ? OR symbol IS NULL)
+        ORDER BY recordedAt DESC LIMIT ?
+      `).all(symbol, limit);
+    } catch { return []; }
+  }
+  return [];
+}

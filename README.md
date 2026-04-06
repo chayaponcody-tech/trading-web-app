@@ -1,73 +1,40 @@
-# React + TypeScript + Vite
+# 🚀 CryptoSmartTrade Ecosystem
+> โครงสร้างระบบเทรดอัตโนมัติที่ผสานพลัง Quant Technical Analysis เข้ากับ Cognitive AI (DeepSeek/Gemini)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+---
 
-Currently, two official plugins are available:
+## 💎 สารบัญขีดความสามารถ (System Capabilities)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+### 🧠 1. Cognitive Intelligence Layer
+*   **AI Reflection (Double-Check):** ทุกสัญญาณการเทรดจะถูกกรองโดย AI (OpenRouter) เพื่อลด False Signal จากความผันผวนที่ Indicator มองไมเห็น
+*   **AI Mistakes Memory (Learning Bot):** 🆕 ระบบจดจำความผิดพลาด บอทจะใช้ AI วิเคราะห์สาเหตุทุกครั้งที่ขาดทุน และบันทึกเป็น "บทเรียน" ลง SQLite เพื่อป้องกันการทำผิดซ้ำในอนาคต
 
-## React Compiler
+### 📈 2. Advanced Trading Logic
+*   **Adaptive Trailing Stop Loss:** 🆕 เมื่อกำไรถึงเป้า (+1.5%) ระบบจะเริ่มเลื่อน Stop Loss ตามราคาขึ้นไปเรื่อยๆ (+1%) เพื่อล็อคกำไรและปล่อยให้กำไรรัน (Let Profit Run)
+*   **Multi-Strategy Support:** รองรับทั้ง EMA Crossover, Bollinger Bands Mean Reversion, RSI Scalp และ AI Scout Mode
+*   **Precision Entry:** ระบบแบ่งไม้เข้าซื้อ (Step Entry) เพื่อให้ได้ค่าเฉลี่ยราคาที่ดีที่สุด
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 🐳 3. Modern Infrastructure & Security
+*   **Docker Dev Mode (Hot-Reload):** ระบบ Docker ที่เชื่อมโยงโค้ดในเครื่องเข้ากับคอนเทนเนอร์โดยตรง แก้โค้ดแล้วอัปเดตทันทีโดยไม่ต้อง Build ใหม่
+*   **Lean Multi-Stage Images:** ใช้เทคนิค Multi-stage build เพื่อสร้าง Docker Image ขนาดเล็กที่สุด (ลบไฟล์ DevDependencies และ Build Tools ทิ้งใน Production)
+*   **Unified Environment:** สลับระหว่าง **Binance Testnet** และ **Live** ได้ง่ายๆ เพียงเปลี่ยนค่าใน `.env`
 
-## Expanding the ESLint configuration
+---
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## 🛠 วิธีเริ่มต้นใช้งาน (Quick Start)
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+1.  **ตั้งค่ากุญแจ:** แก้ไขไฟล์ `.env` ใส่ API Key ของ Binance และ OpenRouter
+2.  **รันระบบ:** 
+    ```powershell
+    docker compose up --build -d
+    ```
+3.  **เข้าใช้งาน:** 
+    *   หน้าบ้าน (Frontend): `http://localhost:4000`
+    *   หลังบ้าน (API): `http://localhost:4001`
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+---
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
-
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+## 📝 บันทึกการพัฒนา (Development Log)
+- **2026-04-06:** เพิ่มระบบ AI Mistakes Memory และ Adaptive Trailing Stop
+- **2026-04-05:** ปรับปรุง Docker Optimization และ ระบบ API Proxy
+- **2026-04-04:** พัฒนา AI Portfolio Manager และ Hunter Bot

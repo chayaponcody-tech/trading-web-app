@@ -14,16 +14,27 @@ export function createBinanceRoutes(botManager, binanceConfig) {
     return new BinanceAdapter(cfg.apiKey, cfg.apiSecret);
   };
 
-  r.get('/account', async (req, res, next) => {
+  r.get('/account', async (req, res) => {
     try {
-      const svc = getService();
-      const [account, risk] = await Promise.all([svc.getAccountInfo(), svc.getPositionRisk()]);
+      const cfg = loadBinanceConfig();
+      if (!cfg.apiKey || !cfg.apiSecret) {
+        return res.json({ assets: [], positions: [], error: 'API Keys not configured' });
+      }
+
+      const svc = new BinanceAdapter(cfg.apiKey, cfg.apiSecret);
+      const [account, risk] = await Promise.all([
+        svc.getAccountInfo().catch(() => ({ assets: [], positions: [] })),
+        svc.getPositionRisk().catch(() => [])
+      ]);
+
       const merged = (account.positions || []).map((p) => {
-        const r = risk.find((rk) => rk.symbol === p.symbol);
+        const r = Array.isArray(risk) ? risk.find((rk) => rk.symbol === p.symbol) : null;
         return { ...p, markPrice: r?.markPrice, liquidationPrice: r?.liquidationPrice };
       });
       res.json({ ...account, positions: merged });
-    } catch (e) { next(e); }
+    } catch (e) {
+      res.status(200).json({ assets: [], positions: [], error: e.message });
+    }
   });
 
   r.get('/balance', async (req, res, next) => {
@@ -31,9 +42,15 @@ export function createBinanceRoutes(botManager, binanceConfig) {
     catch (e) { next(e); }
   });
 
-  r.get('/position-risk', async (req, res, next) => {
-    try { res.json(await getService().getPositionRisk()); }
-    catch (e) { next(e); }
+  r.get('/position-risk', async (req, res) => {
+    try {
+      const cfg = loadBinanceConfig();
+      if (!cfg.apiKey || !cfg.apiSecret) return res.json([]);
+      const svc = new BinanceAdapter(cfg.apiKey, cfg.apiSecret);
+      res.json(await svc.getPositionRisk());
+    } catch (e) {
+      res.json([]);
+    }
   });
 
   r.post('/close-manual', async (req, res, next) => {

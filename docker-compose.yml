@@ -11,11 +11,11 @@ services:
     env_file:
       - .env
     volumes:
+      - .:/app
+      - /app/node_modules
       - ./trading_app.db:/app/trading_app.db
-      - ./paper-trading-db.json:/app/paper-trading-db.json
-      - ./forward-bots-db.json:/app/forward-bots-db.json
-      - ./trade-memory.json:/app/trade-memory.json
-    restart: unless-stopped
+    command: npm start
+    restart: always
 
   frontend:
     build:

@@ -3,6 +3,7 @@ import { reflect } from '../../ai-agents/src/ReflectionAgent.js';
 import { reviewBot } from '../../ai-agents/src/ReviewerAgent.js';
 import { saveBotMap, deleteBot } from '../../data-layer/src/repositories/botRepository.js';
 import { appendTrade } from '../../data-layer/src/repositories/tradeRepository.js';
+import { saveMistake, getRecentMistakes } from '../../data-layer/src/index.js';
 import { TZ_OPTS } from '../../shared/config.js';
 import { TuningService } from './TuningService.js';
 
@@ -176,7 +177,11 @@ export class BotManager {
       const lastCloseTime = closed.at(-1)?.[6] ?? null;
       const currPrice = parseFloat(ticker.price);
 
+      // Update memory & Handle Trailing Stop
       bot.currentPrice = currPrice;
+      this._handleTrailingStop(botId, currPrice);
+      
+      this.bots.set(botId, bot);
       bot.lastChecked = new Date().toLocaleString('th-TH', TZ_OPTS);
 
       // ── Handle Max Drawdown ────────────────────────────────────────────────
@@ -314,13 +319,15 @@ export class BotManager {
   }
 
   async _openPosition(bot, signal, currPrice, closes) {
-    // Optional reflection validation
-    if (bot.config.useReflection && this.config.openRouterKey) {
-      const result = await reflect(
-        bot, signal, currPrice,
-        this.config.openRouterKey,
-        this.config.openRouterModel
-      );
+    // 1. Optional Reflection Validation (Learning from Past Mistakes)
+    if (bot.config.useReflection && this.binanceConfig.openRouterKey) {
+       const pastMistakes = getRecentMistakes(bot.config.symbol, 3);
+       const result = await ReflectionAgent.reflect(
+         bot, signal, currPrice, 
+         this.binanceConfig.openRouterKey, 
+         this.binanceConfig.openRouterModel,
+         pastMistakes
+       );
 
       // Record reflection in history
       bot.reflectionHistory = bot.reflectionHistory || [];
@@ -480,6 +487,13 @@ export class BotManager {
 
       bot.trades.push(trade);
       appendTrade(trade);
+      
+      // If loss, record mistake lesson automatically
+      if (pnl < 0) {
+        this._recordAILesson(bot.id, trade).catch(err => console.error('Mistake Record Error:', err.message));
+      }
+
+      this._save();
       console.log(`[Bot ${bot.id}] ${reason}: ${pnl.toFixed(4)} USDT`);
 
       if (this.notificationService) {
@@ -549,5 +563,78 @@ export class BotManager {
 
   _save() {
     saveBotMap(this.bots);
+  }
+
+  // ─── Adaptive Trailing Stop Logic ──────────────────────────────────────────
+
+  _handleTrailingStop(botId, currentPrice) {
+    const bot = this.bots.get(botId);
+    if (!bot || !bot.openPositions || bot.openPositions.length === 0) return;
+
+    const pos = bot.openPositions[0];
+    const side = pos.type.toUpperCase();
+    const isLong = side === 'LONG' || side === 'BUY';
+    
+    // Calculate Trailing Activation
+    // If price moves 1% in profit, start trailing with 1% distance
+    const entryPrice = parseFloat(pos.entryPrice);
+    const pnlPct = isLong ? (currentPrice - entryPrice) / entryPrice : (entryPrice - currentPrice) / entryPrice;
+    
+    // Activation threshold: 1.5% profit
+    if (pnlPct > 0.015) {
+       const trailDistance = currentPrice * 0.01; // 1% trailing
+       const newSl = isLong ? currentPrice - trailDistance : currentPrice + trailDistance;
+       
+       // Only move SL in our favor (up for long, down for short)
+       if (isLong) {
+         if (!bot.config.slPrice || newSl > bot.config.slPrice) {
+           bot.config.slPrice = newSl;
+           console.log(`[Bot ${botId}] Trailing SL Moved Up: ${newSl.toFixed(2)}`);
+         }
+       } else {
+         if (!bot.config.slPrice || newSl < bot.config.slPrice) {
+           bot.config.slPrice = newSl;
+           console.log(`[Bot ${botId}] Trailing SL Moved Down: ${newSl.toFixed(2)}`);
+         }
+       }
+    }
+  }
+
+  // ─── AI Mistakes Analysis Logic ──────────────────────────────────────────────
+
+  async _recordAILesson(botId, trade) {
+    const bot = this.bots.get(botId);
+    if (!bot) return;
+
+    try {
+      const prompt = `วิเคราะห์ความผิดพลาดจากการเทรด:
+      เหรียญ: ${trade.symbol} | กลยุทธ์: ${trade.strategy}
+      ราคาเข้า: ${trade.entryPrice} | ราคาออก: ${trade.exitPrice}
+      เหตุผลที่เข้า: ${trade.entryReason}
+      PnL: ${trade.pnl} USDT
+      
+      สรุปบทเรียนสั้นๆ 1 ประโยคว่าทำไมถึงแพ้ และควรระวังอะไรในสภาวะตลาดแบบนี้ในอนาคต?`;
+
+      const aiResponse = await ReflectionAgent.analyze(
+        [], 'MistakeAnalysis', prompt, 
+        this.binanceConfig.openRouterKey, 
+        this.binanceConfig.openRouterModel
+      );
+
+      saveMistake({
+        botId,
+        symbol: trade.symbol,
+        strategy: trade.strategy,
+        entryPrice: trade.entryPrice,
+        exitPrice: trade.exitPrice,
+        pnl: trade.pnl,
+        marketContext: trade.entryReason,
+        aiLesson: aiResponse || 'Unknown cause'
+      });
+      
+      console.log(`🧠 [AI Lesson Learned] ${trade.symbol}: ${aiResponse}`);
+    } catch (e) {
+      console.error('[BotManager] _recordAILesson error:', e.message);
+    }
   }
 }

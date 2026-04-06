@@ -1,5 +1,5 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare } from 'lucide-react';
+import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare, Layers } from 'lucide-react';
 import './App.css';
 
 function Sidebar() {
@@ -10,7 +10,7 @@ function Sidebar() {
     { path: '/backtest', name: 'Backtest (ทดสอบ)', icon: <FlaskConical size={20} /> },
   ];
   const bottomItems = [
-    { path: '/strategies', name: 'กลยุทธ์', icon: <Settings size={20} /> },
+    { path: '/strategies', name: 'ภาพรวมระบบ', icon: <Layers size={20} /> },
     { path: '/logs', name: 'บันทึก (Logs)', icon: <Terminal size={20} /> },
     { path: '/telegram-logs', name: 'Telegram Logs', icon: <MessageSquare size={20} color="#0088cc" /> },
   ];

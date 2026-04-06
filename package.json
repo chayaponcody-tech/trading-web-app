@@ -11,8 +11,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "start": "concurrently \"node packages/api-gateway/src/server.js\" \"vite\"",
-    "backend": "node packages/api-gateway/src/server.js",
+    "start": "concurrently \"node --watch packages/api-gateway/src/server.js\" \"vite\"",
+    "backend": "node --watch packages/api-gateway/src/server.js",
     "backend:legacy": "node server.js",
     "migrate": "node migrateToJsonToSqlite.js"
   },
