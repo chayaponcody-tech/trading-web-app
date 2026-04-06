@@ -1171,16 +1171,27 @@ export default function BinanceTestnet() {
                     const upnl = parseFloat(p.unrealizedProfit || p.unRealizedProfit || 0);
                     const amt = parseFloat(p.positionAmt || 0);
                     const side = amt > 0 ? 'LONG' : 'SHORT';
+                    const linkedBot = bots.find(b => b.config.symbol === p.symbol);
                     
                     return (
-                      <div key={i} style={{ minWidth: '160px', padding: '0.5rem', background: 'var(--panel-bg)', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '0.8rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
-                          <span>{p.symbol}</span>
+                      <div key={i} style={{ minWidth: '220px', padding: '0.6rem', background: 'var(--panel-bg)', borderRadius: '8px', border: '1px solid var(--border-color)', fontSize: '0.8rem', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold', marginBottom: '0.2rem' }}>
+                          <span style={{ fontSize: '0.9rem' }}>{p.symbol}</span>
                           <span style={{ color: upnl >= 0 ? '#0ecb81' : '#f6465d' }}>
                             {upnl >= 0 ? '+' : ''}{upnl.toFixed(2)}
                           </span>
                         </div>
-                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>{side} · {p.leverage}x</div>
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginBottom: '0.4rem', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '0.2rem' }}>
+                          <span style={{ color: side === 'LONG' ? '#0ecb81' : '#f6465d' }}>{side}</span> · {p.leverage}x
+                        </div>
+                        {linkedBot && (
+                          <div style={{ fontSize: '0.62rem', color: '#faad14', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                            <span style={{ opacity: 0.8 }}>🧠</span>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '160px' }} title={linkedBot.openPositions?.[0]?.entryReason || linkedBot.aiReason}>
+                              {linkedBot.openPositions?.[0]?.entryReason || linkedBot.aiReason || 'Manual/Technical'}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -2134,9 +2145,16 @@ function BotCard({ bot, onStop, onDelete, onResume, expanded, onToggle, isGrid =
                 ${bot.currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               {bot.openPositions.length > 0 && (
-                <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.65rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
-                  <span style={{ color: '#0ecb81' }}>🎯 TP { (bot.openPositions[0].type === 'LONG' ? bot.openPositions[0].entryPrice * (1 + bot.config.tpPercent / 100) : bot.openPositions[0].entryPrice * (1 - bot.config.tpPercent / 100)).toFixed(bot.currentPrice < 0.01 ? 6 : bot.currentPrice < 10 ? 4 : 2) }</span>
-                  <span style={{ color: '#f6465d' }}>🛑 SL { (bot.openPositions[0].type === 'LONG' ? bot.openPositions[0].entryPrice * (1 - bot.config.slPercent / 100) : bot.openPositions[0].entryPrice * (1 + bot.config.slPercent / 100)).toFixed(bot.currentPrice < 0.01 ? 6 : bot.currentPrice < 10 ? 4 : 2) }</span>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.65rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
+                    <span style={{ color: '#0ecb81' }}>🎯 TP { (bot.openPositions[0].type === 'LONG' ? bot.openPositions[0].entryPrice * (1 + bot.config.tpPercent / 100) : bot.openPositions[0].entryPrice * (1 - bot.config.tpPercent / 100)).toFixed(bot.currentPrice < 0.01 ? 6 : bot.currentPrice < 10 ? 4 : 2) }</span>
+                    <span style={{ color: '#f6465d' }}>🛑 SL { (bot.openPositions[0].type === 'LONG' ? bot.openPositions[0].entryPrice * (1 - bot.config.slPercent / 100) : bot.openPositions[0].entryPrice * (1 + bot.config.slPercent / 100)).toFixed(bot.currentPrice < 0.01 ? 6 : bot.currentPrice < 10 ? 4 : 2) }</span>
+                  </div>
+                  {bot.openPositions[0].entryReason && (
+                    <div style={{ fontSize: '0.62rem', color: '#faad14', fontStyle: 'italic', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={bot.openPositions[0].entryReason}>
+                      💬 {bot.openPositions[0].entryReason}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

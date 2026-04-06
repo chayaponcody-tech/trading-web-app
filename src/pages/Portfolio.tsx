@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { 
   Wallet, TrendingUp, ShieldAlert, Cpu, 
   Activity, Settings, RefreshCw, Layers, 
-  CheckCircle2, Trash2
+  CheckCircle2, Trash2, BrainCircuit
 } from 'lucide-react';
 
 const API = '';
@@ -28,6 +28,7 @@ export default function Portfolio() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [mistakes, setMistakes] = useState<any[]>([]);
 
   // Form states
   const [budget, setBudget] = useState(1000);
@@ -37,18 +38,21 @@ export default function Portfolio() {
 
   const fetchData = async () => {
     try {
-      const [resStatus, resWallet, resBots] = await Promise.all([
+      const [resStatus, resWallet, resBots, resMistakes] = await Promise.all([
         fetch(`${API}/api/portfolio/status`),
         fetch(`${API}/api/wallet`),
-        fetch(`${API}/api/bots/summary`)
+        fetch(`${API}/api/bots/summary`),
+        fetch(`${API}/api/binance/mistakes`)
       ]);
       const statusData = await resStatus.json();
       const walletData = await resWallet.json();
       const botsData = await resBots.json();
+      const mistakesData = await resMistakes.json();
       
       setStatus(statusData);
       setWallet(walletData);
       setBots(botsData.filter((b: any) => b.isRunning));
+      setMistakes(mistakesData);
       
       // Update form values from backend config
       if (statusData.config) {
@@ -448,6 +452,35 @@ export default function Portfolio() {
             </div>
           )) : (
             <div className="text-muted italic">No activity recorded yet.</div>
+          )}
+        </div>
+      </div>
+
+      {/* AI Memory Log: Mistakes & Lessons */}
+      <div className="glass-panel" style={{ borderLeft: '4px solid #faad14', background: 'rgba(250, 173, 20, 0.02)' }}>
+        <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1.5rem' }}>
+          <BrainCircuit size={20} color="#faad14" /> AI Brain Memory (Lessons Learned)
+        </h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '1rem' }}>
+          {mistakes.length > 0 ? mistakes.map((m, i) => (
+            <div key={i} className="glass-panel" style={{ padding: '1rem', background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(250,173,20,0.1)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                <strong style={{ color: '#faad14' }}>{m.symbol}</strong>
+                <span style={{ fontSize: '0.75rem', color: 'var(--loss-color)' }}>PnL: ${m.pnl?.toFixed(2)}</span>
+              </div>
+              <div className="text-xs text-muted mb-2">
+                {m.strategy} • Entry: ${m.entryPrice?.toFixed(4)} → Exit: ${m.exitPrice?.toFixed(4)}
+              </div>
+              <div style={{ padding: '0.75rem', background: 'rgba(250, 173, 20, 0.05)', borderRadius: '6px', fontSize: '0.85rem', lineHeight: 1.5, color: '#eee' }}>
+                <span style={{ marginRight: '0.5rem' }}>🧠</span>
+                {m.aiLesson}
+              </div>
+              <div style={{ marginTop: '0.75rem', textAlign: 'right', fontSize: '0.7rem', color: '#666' }}>
+                {new Date(m.recordedAt).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
+              </div>
+            </div>
+          )) : (
+            <div className="text-muted italic p-4">No strategic mistakes recorded yet. AI is still learning!</div>
           )}
         </div>
       </div>

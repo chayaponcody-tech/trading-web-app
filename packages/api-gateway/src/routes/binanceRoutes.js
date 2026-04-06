@@ -157,6 +157,14 @@ export function createBinanceRoutes(botManager, binanceConfig) {
     } catch (e) { next(e); }
   });
 
+  r.get('/mistakes', async (req, res, next) => {
+    try {
+        const { getRecentMistakes } = await import('../../../data-layer/src/index.js');
+        const mistakes = getRecentMistakes(null, 20); // Get last 20 mistakes across all symbols
+        res.json(mistakes);
+    } catch (e) { next(e); }
+  });
+
   return r;
 }
 
