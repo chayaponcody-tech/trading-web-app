@@ -73,6 +73,7 @@ export class BotManager {
       realizedPnl: 0,
       netPnl: 0,
       trades: [],
+      consecutiveLosses: 0,
       aiHistory: [],
       reflectionHistory: [],
       reflectionStatus: null,
@@ -490,7 +491,21 @@ export class BotManager {
       
       // If loss, record mistake lesson automatically
       if (pnl < 0) {
+        bot.consecutiveLosses = (bot.consecutiveLosses || 0) + 1;
         this._recordAILesson(bot.id, trade).catch(err => console.error('Mistake Record Error:', err.message));
+        
+        // Quarantine Check (3 consecutive losses)
+        if (bot.consecutiveLosses >= 3) {
+          const msg = `🛡️ [QUARANTINE] Bot stopped after ${bot.consecutiveLosses} consecutive losses. AI analysis required.`;
+          console.warn(`[Bot ${bot.id}] ${msg}`);
+          bot.isRunning = false;
+          bot.aiReason = msg;
+          if (this.notificationService) {
+            this.notificationService.send(`🚨 *Bot Quarantined*\nSymbol: \`${bot.config.symbol}\` \nReason: 3 consecutive losses. Stopping for safety.`);
+          }
+        }
+      } else if (pnl > 0) {
+        bot.consecutiveLosses = 0;
       }
 
       this._save();

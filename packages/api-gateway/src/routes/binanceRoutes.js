@@ -3,6 +3,7 @@ import { BinanceAdapter } from '../../../exchange-connector/src/BinanceAdapter.j
 import { loadBinanceConfig } from '../../../data-layer/src/repositories/configRepository.js';
 import { getAllTradesFromBots } from '../../../data-layer/src/repositories/tradeRepository.js';
 import { recommendBot, proposeFleet, huntBestSymbols } from '../../../ai-agents/src/index.js';
+import { calculateSharpe, calculateMaxDrawdown, calculateProfitFactor, generateEquityCurve } from '../../../shared/AnalyticsUtils.js';
 
 // ─── Binance Routes ───────────────────────────────────────────────────────────
 export function createBinanceRoutes(botManager, binanceConfig) {
@@ -162,6 +163,48 @@ export function createBinanceRoutes(botManager, binanceConfig) {
         const { getRecentMistakes } = await import('../../../data-layer/src/index.js');
         const mistakes = getRecentMistakes(null, 20); // Get last 20 mistakes across all symbols
         res.json(mistakes);
+    } catch (e) { next(e); }
+  });
+
+  r.get('/analytics', async (req, res, next) => {
+    try {
+      // 1. Get all closed trades
+      const allTrades = getAllTradesFromBots(botManager.bots);
+      if (!allTrades || allTrades.length === 0) {
+        return res.json({
+          sharpe: 0,
+          maxDrawdown: 0,
+          profitFactor: 0,
+          equityCurve: [],
+          totalTrades: 0,
+          winRate: 0
+        });
+      }
+
+      const pnlList = allTrades.map(t => parseFloat(t.pnl || 0));
+      const equityCurve = generateEquityCurve(allTrades, 1000); // 1000 is default base
+
+      const winCount = pnlList.filter(p => p > 0).length;
+      
+      res.json({
+        sharpe: calculateSharpe(pnlList),
+        maxDrawdown: calculateMaxDrawdown(equityCurve.map(e => e.value)),
+        profitFactor: calculateProfitFactor(pnlList),
+        equityCurve,
+        totalTrades: allTrades.length,
+        winRate: (winCount / allTrades.length) * 100
+      });
+    } catch (e) { next(e); }
+  });
+
+  r.post('/backtest', async (req, res, next) => {
+    try {
+      const { symbol, strategy, interval = '1h', tpPercent, slPercent, leverage, capital } = req.body;
+      const { runBacktest } = await import('../../../bot-engine/src/Backtester.js');
+      const svc = getService();
+      const klines = await svc.getKlines(symbol, interval, 500); // 500 bars for backtest
+      const result = runBacktest(klines, { symbol, strategy, interval, tpPercent, slPercent, leverage, capital });
+      res.json(result);
     } catch (e) { next(e); }
   });
 
