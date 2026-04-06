@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { API, type Bot } from '../types';
 
 interface Props {
@@ -20,6 +20,22 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
   const [editingInterval, setEditingInterval] = useState<number>(bot.config.aiCheckInterval || 0);
   const [isUpdating, setIsUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'trades' | 'positions' | 'ai' | 'reflect'>('trades');
+  const [marketDepth, setMarketDepth] = useState<{ openInterest: number; fundingRate: number; nextFundingTime: number } | null>(null);
+
+  useEffect(() => {
+    if (expanded && bot.config.symbol) {
+      const fetchDepth = async () => {
+        try {
+          const res = await fetch(`${API}/api/binance/market-depth?symbol=${bot.config.symbol}`);
+          const data = await res.json();
+          setMarketDepth(data);
+        } catch (e) { console.error('Failed to fetch market depth', e); }
+      };
+      fetchDepth();
+      const timer = setInterval(fetchDepth, 30000); // Update every 30s
+      return () => clearInterval(timer);
+    }
+  }, [expanded, bot.config.symbol]);
 
   const handleUpdateInterval = async () => {
     setIsUpdating(true);
@@ -154,6 +170,38 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
         <MiniStat label="Smart Budget" value={`$${(bot.config.positionSizeUSDT || bot.capital || 0).toFixed(2)}`} color="#faad14" />
         <MiniStat label="Win Rate" value={`${winRate}%`} color={parseFloat(winRate) >= 50 ? '#0ecb81' : '#f6465d'} />
         <MiniStat label="Risk Shield" value={`$${(bot.config.maxLossUSDT || (bot.config.positionSizeUSDT || bot.capital || 0) * 0.05).toFixed(2)}`} color="#f6465d" />
+      </div>
+
+      {/* Market Microstructure (Quant Upgrade) */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: '1fr 1fr', 
+        gap: '0.75rem', 
+        padding: '0.8rem', 
+        borderRadius: '8px',
+        background: 'linear-gradient(135deg, rgba(24, 144, 255, 0.05) 0%, rgba(24, 144, 255, 0.02) 100%)',
+        border: '1px solid rgba(24, 144, 255, 0.1)'
+      }}>
+        <div>
+          <div style={{ fontSize: '0.64rem', color: '#1890ff', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
+            📊 Open Interest (Delta)
+          </div>
+          <div style={{ fontSize: '1rem', fontWeight: 'bold', color: '#fff' }}>
+            {marketDepth ? marketDepth.openInterest.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '...'}
+            <span style={{ fontSize: '0.6rem', color: '#888', marginLeft: '0.3rem', fontWeight: 'normal' }}>Contracts</span>
+          </div>
+        </div>
+        <div>
+          <div style={{ fontSize: '0.64rem', color: '#0ecb81', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '0.2rem' }}>
+            💰 Funding Rate
+          </div>
+          <div style={{ fontSize: '1rem', fontWeight: 'bold', color: (marketDepth?.fundingRate || 0) > 0 ? '#faad14' : '#0ecb81' }}>
+            {marketDepth ? (marketDepth.fundingRate * 100).toFixed(4) : '...'}%
+            <span style={{ fontSize: '0.6rem', color: '#888', marginLeft: '0.3rem', fontWeight: 'normal' }}>
+               { (marketDepth?.fundingRate || 0) > 0 ? 'Long Pays Short' : 'Short Pays Long' }
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* Current Diagnostic Thought (Live Brain) */}

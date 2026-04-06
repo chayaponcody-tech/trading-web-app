@@ -11,10 +11,8 @@ services:
     env_file:
       - .env
     volumes:
-      - .:/app
-      - /app/node_modules
       - ./trading_app.db:/app/trading_app.db
-    command: npm start
+    command: node packages/api-gateway/src/server.js
     restart: always
 
   frontend:

@@ -20,6 +20,10 @@ export class PortfolioManager {
     this.logs = [];
   }
 
+  setExchange(exchange) {
+    this.exchange = exchange;
+  }
+
   log(message, type = 'info') {
     const entry = {
       timestamp: new Date().toISOString(),

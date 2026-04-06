@@ -23,8 +23,7 @@ WORKDIR /app
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/packages ./packages
-# ลบ dev dependencies ออกเพื่อแอปขนาดเล็กลง (Optional if npm install handled it)
-RUN npm prune --omit=dev --foreground-scripts=false
+# (npm prune removed to avoid breaking workspace symlinks or deleting packages)
 
 ENV PORT=4001
 ENV NODE_ENV=production

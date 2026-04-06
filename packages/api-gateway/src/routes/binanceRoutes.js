@@ -6,13 +6,11 @@ import { recommendBot, proposeFleet, huntBestSymbols } from '../../../ai-agents/
 import { calculateSharpe, calculateMaxDrawdown, calculateProfitFactor, generateEquityCurve } from '../../../shared/AnalyticsUtils.js';
 
 // ─── Binance Routes ───────────────────────────────────────────────────────────
-export function createBinanceRoutes(botManager, binanceConfig) {
+export function createBinanceRoutes(botManager, portfolioManager, binanceConfig) {
   const r = Router();
 
   const getService = () => {
-    const cfg = loadBinanceConfig();
-    if (!cfg.apiKey || !cfg.apiSecret) throw Object.assign(new Error('API keys not set'), { status: 400 });
-    return new BinanceAdapter(cfg.apiKey, cfg.apiSecret);
+    return botManager.exchange;
   };
 
   r.get('/account', async (req, res) => {
@@ -22,7 +20,7 @@ export function createBinanceRoutes(botManager, binanceConfig) {
         return res.json({ assets: [], positions: [], error: 'API Keys not configured' });
       }
 
-      const svc = new BinanceAdapter(cfg.apiKey, cfg.apiSecret);
+      const svc = getService();
       const [account, risk] = await Promise.all([
         svc.getAccountInfo().catch(() => ({ assets: [], positions: [] })),
         svc.getPositionRisk().catch(() => [])
@@ -47,7 +45,7 @@ export function createBinanceRoutes(botManager, binanceConfig) {
     try {
       const cfg = loadBinanceConfig();
       if (!cfg.apiKey || !cfg.apiSecret) return res.json([]);
-      const svc = new BinanceAdapter(cfg.apiKey, cfg.apiSecret);
+      const svc = getService();
       res.json(await svc.getPositionRisk());
     } catch (e) {
       res.json([]);
@@ -57,7 +55,58 @@ export function createBinanceRoutes(botManager, binanceConfig) {
   r.post('/close-manual', async (req, res, next) => {
     try {
       const { symbol, type, quantity } = req.body;
-      res.json(await getService().closePosition(symbol, type, quantity));
+      const svc = getService();
+      
+      // 0. Fetch LIVE POSITION to get real Entry Price BEFORE closing
+      const account = await svc.getAccountInfo().catch(() => ({ positions: [] }));
+      const livePos = (account.positions || []).find(p => p.symbol.toUpperCase() === symbol.toUpperCase() && parseFloat(p.positionAmt) !== 0);
+      const realEntryPrice = livePos ? parseFloat(livePos.entryPrice) : 0;
+      const realQuantity = livePos ? Math.abs(parseFloat(livePos.positionAmt)) : parseFloat(quantity || 0);
+
+      // 1. Close on Binance
+      const result = await svc.closePosition(symbol, type, quantity);
+      const exitPrice = result.price || (await svc.getTickerPrice(symbol)).price;
+
+      // 2. Try to find a matching bot
+      const targetBot = botManager.findBotBySymbol(symbol);
+      const { appendTrade } = await import('../../../data-layer/src/repositories/tradeRepository.js');
+
+      if (targetBot && targetBot.openPositions && targetBot.openPositions.length > 0) {
+          const pos = targetBot.openPositions[0];
+          const finalEntry = pos.entryPrice || realEntryPrice;
+          const finalQty = pos.quantity || realQuantity;
+          const outTrade = {
+              botId: targetBot.id,
+              symbol: symbol,
+              type: pos.type === 'LONG' ? 'SELL' : 'BUY',
+              entryPrice: finalEntry,
+              exitPrice: exitPrice,
+              exitTime: new Date().toISOString(),
+              pnl: (pos.type === 'LONG' ? (exitPrice - finalEntry) : (finalEntry - exitPrice)) * finalQty,
+              strategy: targetBot.config.strategy,
+              reason: '[MANUAL] User Closed'
+          };
+          appendTrade(outTrade);
+          targetBot.openPositions = [];
+      } else {
+        // 3. Fallback: Manual Trade (Using real entry from exchange if possible)
+        const side = type === 'SELL' ? 'BUY' : 'SELL'; // Closure side
+        const pnl = (side === 'SELL' ? (exitPrice - realEntryPrice) : (realEntryPrice - exitPrice)) * realQuantity;
+
+        appendTrade({
+          botId: 'MANUAL_CLOSE',
+          symbol: symbol,
+          type: side,
+          entryPrice: realEntryPrice || exitPrice,
+          exitPrice: exitPrice,
+          exitTime: new Date().toISOString(),
+          pnl: pnl,
+          reason: '[MANUAL] User Closed',
+          strategy: 'Direct Manual'
+        });
+      }
+
+      res.json(result);
     } catch (e) { next(e); }
   });
 
@@ -89,6 +138,11 @@ export function createBinanceRoutes(botManager, binanceConfig) {
         // Refresh BotManager config
         const updated = loadBinanceConfig();
         botManager.setConfig(updated);
+
+        // Reset shared adapter to use new keys and propagate to all managers
+        const newAdapter = new BinanceAdapter(updated.apiKey || '', updated.apiSecret || '');
+        botManager.setExchange(newAdapter);
+        if (portfolioManager) portfolioManager.setExchange(newAdapter);
         
         // Hot-swap telegram service (if implemented on BotManager)
         if (botManager.setNotificationService) {
@@ -214,6 +268,28 @@ export function createBinanceRoutes(botManager, binanceConfig) {
       const svc = getService();
       const klines = await svc.getKlines(symbol, interval, parseInt(limit));
       res.json(klines);
+    } catch (e) { next(e); }
+  });
+
+  r.get('/market-depth', async (req, res, next) => {
+    try {
+      const { symbol } = req.query;
+      if (!symbol) return res.status(400).json({ error: 'Symbol is required' });
+      const svc = getService();
+      
+      // Fetch microstructure data (OI and Funding)
+      const [oi, funding] = await Promise.all([
+        svc.fetchOpenInterest(symbol).catch(() => null),
+        svc.fetchFundingRate(symbol).catch(() => null)
+      ]);
+
+      res.json({
+        symbol,
+        openInterest: oi?.openInterestAmount || oi?.info?.sumOpenInterest || oi || 0,
+        fundingRate: funding?.fundingRate || 0,
+        nextFundingTime: funding?.nextFundingTime || 0,
+        timestamp: Date.now()
+      });
     } catch (e) { next(e); }
   });
 

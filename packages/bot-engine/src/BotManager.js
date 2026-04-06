@@ -41,6 +41,14 @@ export class BotManager {
     this.notificationService = service;
   }
 
+  findBotBySymbol(symbol) {
+    const sym = symbol.toUpperCase();
+    for (const bot of this.bots.values()) {
+      if (bot.config.symbol.toUpperCase() === sym) return bot;
+    }
+    return null;
+  }
+
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
   async startBot(botConfig) {
@@ -316,6 +324,12 @@ export class BotManager {
       this._save();
     } catch (err) {
       console.error(`[Bot ${botId}] Tick error:`, err.message);
+      if (err.message.includes('-2015') || err.message.includes('-2008') || err.message.includes('API-key')) {
+        console.warn(`[Bot ${botId}] AUTO-PAUSED due to Invalid API Keys.`);
+        bot.isRunning = false;
+        bot.aiReason = 'Stopped automatically due to Invalid API Keys. Please update Demo Keys.';
+        this._save();
+      }
     }
   }
 

@@ -57,7 +57,7 @@ portfolioManager.init().then(() => portfolioManager.start());
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/bots',      createBotRoutes(botManager));
 app.use('/api/ai',        createAiRoutes(botManager, binanceConfig));
-app.use('/api/binance',   createBinanceRoutes(botManager, binanceConfig));
+app.use('/api/binance',   createBinanceRoutes(botManager, portfolioManager, binanceConfig));
 app.use('/api/config',    createConfigRoutes(botManager));
 app.use('/api/portfolio', createPortfolioRoutes(portfolioManager));
 app.use('/api/wallet',    createWalletRoutes());
