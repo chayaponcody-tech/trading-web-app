@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTradingData } from './useTradingData';
 import { StatLarge } from './components/StatWidgets';
-import HistoryTab from './components/HistoryTab';
+import HistoryTab from './components/HistoryTabV2';
 import MemoryTab from './components/MemoryTab';
 import PositionsTab from './components/PositionsTab';
 import TuningLogs from './components/TuningLogs';
@@ -237,7 +237,7 @@ export default function BinanceLive() {
       gridLower: aiRecommendation.grid_lower,
       positionSizeUSDT: positionSizeUSDT, // CRITICAL FIX: Use shared capital
       entry_steps: aiRecommendation.entry_steps,
-      managedBy: 'auto-pilot'
+      managedBy: 'manual'
     });
     setShowAIModal(false);
   };

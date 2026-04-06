@@ -10,3 +10,6 @@ yarn-error.log*
 .env
 # Keep trading_app.db if you want it included in image (requested for PoC)
 # trading_app.db
+
+# Exclude corrupt legacy file — replaced by HistoryTabV2.tsx
+src/pages/BinanceLive/components/HistoryTab.tsx

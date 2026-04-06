@@ -34,7 +34,7 @@ const exchange = binanceConfig.apiKey && binanceConfig.apiSecret
   : null;
 
 const botManager = new BotManager(exchange, binanceConfig);
-const portfolioManager = new PortfolioManager(botManager, exchange);
+const portfolioManager = new PortfolioManager(botManager, exchange, { managerId: 'portfolio1' });
 
 // Initialize Notifications
 const notificationService = new NotificationService(binanceConfig);
@@ -80,6 +80,42 @@ app.get('/api/backtest', async (req, res, next) => {
       apiRes.on('end', () => res.json(JSON.parse(data)));
     }).on('error', next);
   } catch (e) { next(e); }
+});
+
+// ─── Phase 1.5: Python Strategy Bridge ────────────────────────────────────────
+// This endpoint is called by the 'strategy-ai' container (Python)
+app.post('/api/execute-python', async (req, res, next) => {
+  try {
+    const { symbol, type, quantity, source = 'Python-AI' } = req.body;
+    
+    if (!exchange) return res.status(503).json({ error: 'Exchange not initialized' });
+    if (!symbol || !type || !quantity) return res.status(400).json({ error: 'Missing parameters' });
+
+    console.log(`📡 [Gateway] Execution Request from ${source}: ${type} ${quantity} ${symbol}`);
+    
+    // Execute a standard MARKET order via CCXT
+    const result = await exchange.placeOrder(symbol, type === 'BUY' ? 'BUY' : 'SELL', 'MARKET', quantity);
+    
+    // Optional: Log it in our history
+    const { appendTrade } = await import('../../data-layer/src/repositories/tradeRepository.js');
+    appendTrade({
+        botId: 'STRATEGY_AI_PYTHON',
+        symbol: symbol,
+        type: type === 'BUY' ? 'BUY' : 'SELL',
+        entryPrice: result.price || 0,
+        exitPrice: 0,
+        exitTime: null,
+        pnl: 0,
+        strategy: `Python-${source}`,
+        reason: 'Signal from Remote Strategy Layer',
+        entryTime: new Date().toISOString()
+    });
+
+    res.json({ success: true, result });
+  } catch (e) {
+    console.error('[Gateway] Python Bridge Error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ─── Compatibility Endpoints (Legacy State) ───────────────────────────────────

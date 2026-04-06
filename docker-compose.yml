@@ -25,3 +25,15 @@ services:
     depends_on:
       - backend
     restart: unless-stopped
+
+  strategy-ai:
+    build:
+      context: ./packages/strategy-ai
+    container_name: cryptosmarttrade-strategy
+    ports:
+      - "8001:8000"
+    environment:
+      - GATEWAY_INTERNAL_URL=http://backend:4001
+    depends_on:
+      - backend
+    restart: always

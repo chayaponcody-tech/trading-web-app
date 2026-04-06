@@ -3,9 +3,10 @@ import { loadBinanceConfig } from '../../data-layer/src/repositories/configRepos
 import { getSetting, saveSetting } from '../../data-layer/src/repositories/botRepository.js';
 
 export class PortfolioManager {
-  constructor(botManager, exchange) {
+  constructor(botManager, exchange, options = {}) {
     this.botManager = botManager;
     this.exchange = exchange;
+    this.managerId = options.managerId || 'portfolio1'; // Unique identifier for this portfolio manager
     this.config = {
       isAutonomous: false,
       totalBudget: 1000,
@@ -80,10 +81,13 @@ export class PortfolioManager {
   }
 
   async tick() {
-    if (!this.isRunning) return;
+    if (!this.isRunning || this.isScanning) return;
+    this.isScanning = true;
+    
     try {
       const bots = Array.from(this.botManager.bots.values());
-      const activeBots = bots.filter(b => b.isRunning);
+      // count ONLY bots managed by this instance for fleet scaling
+      const activeFleet = bots.filter(b => b.isRunning && b.config.managedBy === this.managerId);
       
       this.currentAction = '🛡️ Checking Risk...';
       const totalNetPnl = bots.reduce((sum, b) => sum + (b.netPnl || 0), 0);
@@ -91,8 +95,8 @@ export class PortfolioManager {
       const currentLossPct = (totalNetPnl / budget) * 100;
 
       if (this.config.maxDailyLossPct > 0 && currentLossPct <= -this.config.maxDailyLossPct) {
-        this.log(`ALERT: Portfolio Max Loss Hit (${currentLossPct.toFixed(2)}%). Shutting down all bots.`, 'warn');
-        activeBots.forEach(b => this.botManager.stopBot(b.id));
+        this.log(`ALERT: Portfolio Max Loss Hit (${currentLossPct.toFixed(2)}%). Shutting down fleet.`, 'warn');
+        activeFleet.forEach(b => this.botManager.stopBot(b.id));
         this.config.isAutonomous = false; 
         this.currentAction = '⚠️ Shield Triggered';
         this.updateConfig(this.config);
@@ -106,7 +110,7 @@ export class PortfolioManager {
 
       // 2. Performance Review & Substitution
       this.currentAction = '📊 Reviewing Performance...';
-      for (const bot of activeBots) {
+      for (const bot of activeFleet) {
         const winRate = bot.totalTrades > 5 ? (bot.winCount / bot.totalTrades) : 1;
         if (bot.totalTrades > 5 && winRate < 0.3 && bot.netPnl < 0) {
           this.log(`Bot ${bot.id} (${bot.config.symbol}) performing poorly. Firing.`, 'warn');
@@ -115,17 +119,19 @@ export class PortfolioManager {
       }
 
       // 3. Gap Filling (Day 0 & Beyond)
-      const currentActiveCount = Array.from(this.botManager.bots.values()).filter(b => b.isRunning).length;
-      if (currentActiveCount < this.config.targetBotCount) {
-        this.currentAction = `🔍 Scanning Gaps (${currentActiveCount}/${this.config.targetBotCount})...`;
-        this.log(`Portfolio Gap Detected (${currentActiveCount}/${this.config.targetBotCount}). Recruiting new bots...`);
-        await this._recruitNewBots(this.config.targetBotCount - currentActiveCount);
+      const currentFleetCount = Array.from(this.botManager.bots.values()).filter(b => b.isRunning && b.config.managedBy === this.managerId).length;
+      if (currentFleetCount < this.config.targetBotCount) {
+        this.currentAction = `🔍 Scanning Gaps (${currentFleetCount}/${this.config.targetBotCount})...`;
+        this.log(`Fleet Gap Detected (${currentFleetCount}/${this.config.targetBotCount}). Recruiting new bots...`);
+        await this._recruitNewBots(this.config.targetBotCount - currentFleetCount);
       } else {
         this.currentAction = '💤 Monitoring Fleet';
       }
 
     } catch (err) {
       this.log(`Tick Error: ${err.message}`, 'error');
+    } finally {
+      this.isScanning = false;
     }
   }
 
@@ -140,59 +146,51 @@ export class PortfolioManager {
       .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
       .slice(0, 50);
 
-    const existingSymbols = Array.from(this.botManager.bots.values()).map(b => b.config.symbol);
-    const huntGoal = `Find ${count} best coins for my ${this.config.riskMode} fleet strategy. Avoid: ${existingSymbols.join(', ')}`;
+    // Filter out symbols that already have an ACTIVE bot (autonomous or manual)
+    const activeSymbols = Array.from(this.botManager.bots.values())
+      .filter(b => b.isRunning)
+      .map(b => b.config.symbol);
+      
+    const huntGoal = `Find ${count} best coins for my ${this.config.riskMode} fleet strategy. Avoid: ${activeSymbols.join(', ')}`;
     const recommendations = await huntBestSymbols(topByVol, huntGoal, binanceCfg.openRouterKey, binanceCfg.openRouterModel);
     
-    // Log AI's thought process for symbol selection
-    const names = recommendations.length > 0 ? recommendations.map(r => r.symbol).join(', ') : 'No suitable coins found';
-    this.log(`AI Strategic Intent: Selecting [${names}] for the fleet. Analyzing patterns...`, 'info');
-    
     // B. Deploy recommended symbols
-    const totalScore = recommendations.slice(0, count).reduce((sum, r) => sum + (r.score || 70), 0);
+    const toStart = recommendations.slice(0, count);
+    const totalScore = toStart.reduce((sum, r) => sum + (r.score || 70), 0);
     const averageBudget = this.config.totalBudget / this.config.targetBotCount;
 
-    for (const item of recommendations.slice(0, count)) {
-      if (existingSymbols.includes(item.symbol)) continue;
+    for (const item of toStart) {
+      // Re-verify symbol hasn't been started in THIS loop instance
+      const currentBots = Array.from(this.botManager.bots.values());
+      if (currentBots.some(b => b.config.symbol === item.symbol && b.isRunning)) continue;
 
-      this.log(`Analyzing ${item.symbol} for deployment (Score: ${item.score || 'N/A'})...`);
+      this.log(`Analyzing ${item.symbol} for deployment...`);
       
-      // Strategic Cognition for this specific coin
       const klines = await this.exchange.getKlines(item.symbol, '1h', 100);
       const closes = klines.map(k => parseFloat(k[4]));
       const recommendedStrategy = await recommendBot(
-        closes, 
-        this.config.riskMode, 
-        binanceCfg.openRouterKey, 
-        binanceCfg.openRouterModel, 
+        closes, this.config.riskMode, 
+        binanceCfg.openRouterKey, binanceCfg.openRouterModel, 
         item.symbol
       );
 
-      this.log(`Deploying new bot for ${item.symbol}: ${recommendedStrategy.reason}`, 'info');
+      const weight = (item.score || 70) / totalScore;
+      const allocatedBudget = (averageBudget * count) * weight;
       
-      // Smart Partitioning: Allocate based on confidence score (normalized)
-      const botScore = item.score || 70;
-      const weight = botScore / totalScore;
-      const batchBudgetRange = averageBudget * count; // Total capital available for THIS recruitment batch
-      const allocatedBudget = batchBudgetRange * weight;
-      
-      this.log(`Smart Budget Allocation: ${item.symbol} receives $${allocatedBudget.toFixed(2)} (Weight: ${(weight * 100).toFixed(1)}%)`, 'info');
-
-      // Risk Shield: Don't lose more than 5% of the allocated budget (Max Loss Barrier)
-      const maxLossUSDT = allocatedBudget * 0.05; 
-
       const botConfig = {
         symbol: item.symbol,
         strategy: recommendedStrategy.strategy,
         interval: recommendedStrategy.interval || '15m',
         leverage: recommendedStrategy.leverage || 10,
-        positionSizeUSDT: allocatedBudget, // Scaled Budget
-        maxLossUSDT: maxLossUSDT, // Risk Shield Barrier
+        positionSizeUSDT: allocatedBudget,
+        maxLossUSDT: allocatedBudget * 0.05, 
         tpPercent: recommendedStrategy.tp || 1.5,
         slPercent: recommendedStrategy.sl || 1.0,
-        aiReason: recommendedStrategy.reason || 'Autonomous Portfolio Recruitment',
+        aiReason: `[Portfolio Fleet] ${recommendedStrategy.reason || 'Autonomous Recruitment'}`, // Force marker
+        aiModel: binanceCfg.openRouterModel,
+        aiType: this.config.riskMode,
         exchange: 'binance_testnet',
-        isAutonomous: true,
+        managedBy: this.managerId // CRITICAL: Tag as autonomous for UI and scaling logic
       };
 
       try {
@@ -200,8 +198,8 @@ export class PortfolioManager {
         this.log(`Successfully recruited ${item.symbol} (${recommendedStrategy.strategy})`, 'info');
       } catch (e) {
         this.log(`Failed to start bot for ${item.symbol}: ${e.message}`, 'warn');
-        console.error(`[Portfolio] Recruitment error for ${item.symbol}:`, e);
       }
     }
   }
 }
+

@@ -23,19 +23,24 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
   const [marketDepth, setMarketDepth] = useState<{ openInterest: number; fundingRate: number; nextFundingTime: number } | null>(null);
 
   useEffect(() => {
-    if (expanded && bot.config.symbol) {
+    if (bot.config.symbol) {
       const fetchDepth = async () => {
         try {
-          const res = await fetch(`${API}/api/binance/market-depth?symbol=${bot.config.symbol}`);
+          // Standardize symbol for CCXT (handle OMNI/USDT:USDT)
+          const cleanSymbol = bot.config.symbol.includes(':') ? bot.config.symbol : bot.config.symbol;
+          const res = await fetch(`${API}/api/binance/market-depth?symbol=${encodeURIComponent(cleanSymbol)}`);
+          if (!res.ok) throw new Error('Status ' + res.status);
           const data = await res.json();
           setMarketDepth(data);
-        } catch (e) { console.error('Failed to fetch market depth', e); }
+        } catch (e) { 
+          console.error('[BotCard] Market Depth Fetch Failed:', e); 
+        }
       };
       fetchDepth();
-      const timer = setInterval(fetchDepth, 30000); // Update every 30s
+      const timer = setInterval(fetchDepth, 60000); // Update every 1 min (less aggressive to save rate limits)
       return () => clearInterval(timer);
     }
-  }, [expanded, bot.config.symbol]);
+  }, [bot.config.symbol]); // Only depend on symbol, not expanded state
 
   const handleUpdateInterval = async () => {
     setIsUpdating(true);
