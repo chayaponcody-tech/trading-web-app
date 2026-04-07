@@ -116,7 +116,10 @@ export const statusColor = (pos: string) =>
   pos === 'LONG' ? 'var(--profit-color)' : pos === 'SHORT' ? 'var(--loss-color)' : 'var(--text-muted)';
 
 export const formatPrice = (val: number) => {
-  if (Math.abs(val) < 0.01) return val.toFixed(6);
-  if (Math.abs(val) < 10) return val.toFixed(4);
-  return val.toFixed(4); // Changed from 2 to 4 as requested
+  if (!val) return '0.00';
+  const abs = Math.abs(val);
+  if (abs < 0.001) return val.toFixed(8);
+  if (abs < 1) return val.toFixed(6);
+  if (abs < 100) return val.toFixed(4);
+  return val.toFixed(2);
 };

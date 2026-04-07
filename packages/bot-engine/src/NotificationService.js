@@ -45,14 +45,14 @@ export class NotificationService {
     /** 
      * Start the Telegram command listener (Polling Mode)
      * @param {BotManager} botManager - to control bots via commands
-     * @param {PortfolioManager} portfolioManager - to control portfolio via commands
+     * @param {PortfolioManager[]} portfolioManagers - array of portfolio managers
      */
-    async startPolling(botManager, portfolioManager) {
+    async startPolling(botManager, portfolioManagers = []) {
         if (!this.enabled) return;
         
         console.log('[NotificationService] Telegram Listener (Polling) Started');
         this.botManager = botManager;
-        this.portfolioManager = portfolioManager;
+        this.portfolioManagers = Array.isArray(portfolioManagers) ? portfolioManagers : [portfolioManagers];
         this.lastUpdateId = 0;
         
         // Loop for polling
@@ -88,24 +88,24 @@ export class NotificationService {
 
         // 1. Direct Commands (Fast Response)
         if (text === '/start' || text === '/help') {
-            await this.send('*👋 บอทผู้ช่วยเทรดส่วนตัวพร้อมแล้ว!*\n\n*คำสั่งพื้นฐาน (Monitoring):*\n/status - ดูสถานะบอทที่รันอยู่\n/profit - สรุปกำไรปัจจุบัน\n/history [date] - ประวัติการเทรด (เช่น /history 2024-04-04)\n\n*คำสั่งจัดการ (Management):*\n/start_portfolio - เปิดใช้ Auto-Pilot\n/stop_portfolio - ปิดระบบจัดการพอร์ต\n/start_bot <symbol> <strategy> - เปิดบอทคู่ใหม่\n/delete_bot <id> - ลบบอท (ใส่ 4 ตัวท้ายของ ID)');
+            await this.send('*👋 บอทผู้ช่วยเทรดส่วนตัวพร้อมแล้ว!*\n\n*คำสั่งพื้นฐาน (Monitoring):*\n/status - ดูสถานะบอทและทุก Fleet\n/profit - สรุปกำไรปัจจุบัน\n/history [date] - ประวัติการเทรด\n\n*คำสั่งจัดการ (Management):*\n/start_all - เปิดใช้ Auto-Pilot ทุก Fleet\n/stop_all - ปิดระบบจัดการทุก Fleet\n/start_bot <symbol> <strategy> - เปิดบอทคู่ใหม่\n/delete_bot <id> - ลบบอท');
             return;
         }
 
         // 2. Command Processing Logic
-        if (text === '/start_portfolio') {
-             if (this.portfolioManager) {
-                 await this.portfolioManager.updateConfig({ isAutonomous: true });
-                 await this.send('🚀 *Auto-Pilot Enabled:* ระบบเริ่มเฝ้าระวังและเปิดพอร์ตอัตโนมัติแล้วค่ะ');
-                 return;
+        if (text === '/start_all') {
+             for (const pm of this.portfolioManagers) {
+                 await pm.updateConfig({ isAutonomous: true });
              }
+             await this.send('🚀 *Auto-Pilot Enabled:* ทุก Fleet เริ่มทำงานแล้วค่ะ');
+             return;
         }
-        if (text === '/stop_portfolio') {
-             if (this.portfolioManager) {
-                 await this.portfolioManager.updateConfig({ isAutonomous: false });
-                 await this.send('🛑 *Auto-Pilot Disabled:* ปิดระบบวิเคราะห์พอร์ตอัตโนมัติแล้ว');
-                 return;
+        if (text === '/stop_all') {
+             for (const pm of this.portfolioManagers) {
+                 await pm.updateConfig({ isAutonomous: false });
              }
+             await this.send('🛑 *Auto-Pilot Disabled:* ปิดระบบจัดการทุก Fleet แล้ว');
+             return;
         }
 
         // START BOT: /start_bot BTCUSDT AI_GRID_SCALP
@@ -205,7 +205,12 @@ export class NotificationService {
                  await this.send('📭 *ไม่มีบอทที่กำลังรันอยู่ในขณะนี้*');
                  return;
              }
-             let res = `*📊 สถานะบอท (${bots.length} ตัว)*\n`;
+             let res = `*📊 สถานะระบบ (${bots.length} ตัว)*\n`;
+             res += `----------------------------\n`;
+             this.portfolioManagers.forEach(pm => {
+                res += `${pm.isRunning && pm.config.isAutonomous ? '⚙️' : '💤'} *Fleet: ${pm.name}* (${pm.currentAction})\n`;
+             });
+             res += `----------------------------\n`;
              bots.forEach(b => res += `${b.isRunning ? '🟢' : '⚪'} *${b.config.symbol}*: \`${b.netPnl.toFixed(2)} USDT\` (\`${b.config.strategy}\`)\n`);
              await this.send(res);
              return;
@@ -233,7 +238,11 @@ export class NotificationService {
 
             const systemContext = {
                 currentTime: new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' }),
-                portfolioStatus: this.portfolioManager?.config.isAutonomous ? 'AUTO-PILOT ACTIVE' : 'MANUAL MODE',
+                fleets: this.portfolioManagers.map(pm => ({
+                    name: pm.name,
+                    status: pm.config.isAutonomous ? 'AUTO-PILOT ACTIVE' : 'MANUAL MODE',
+                    action: pm.currentAction
+                })),
                 activeBots: bots.map(b => ({
                     id: b.id.slice(-4),
                     symbol: b.config.symbol,

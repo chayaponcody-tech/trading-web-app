@@ -1,19 +1,23 @@
 import { huntBestSymbols, recommendBot } from '../../ai-agents/src/index.js';
 import { loadBinanceConfig } from '../../data-layer/src/repositories/configRepository.js';
-import { getSetting, saveSetting } from '../../data-layer/src/repositories/botRepository.js';
+import { 
+  getFleetById, upsertFleet, addFleetLog, getFleetLogs 
+} from '../../data-layer/src/index.js';
 
 export class PortfolioManager {
   constructor(botManager, exchange, options = {}) {
     this.botManager = botManager;
     this.exchange = exchange;
-    this.managerId = options.managerId || 'portfolio1'; // Unique identifier for this portfolio manager
+    this.managerId = options.managerId || 'portfolio1'; 
+    this.name = options.name || 'Autonomous Portfolio';
     this.config = {
       isAutonomous: false,
       totalBudget: 1000,
       maxDailyLossPct: 5,
       targetBotCount: 3,
       riskMode: 'confident',
-      lastScanTime: 0
+      lastScanTime: 0,
+      ...(options.config || {})
     };
     this.isRunning = false;
     this.timer = null;
@@ -27,29 +31,39 @@ export class PortfolioManager {
 
   log(message, type = 'info') {
     const entry = {
-      timestamp: new Date().toISOString(),
+      timestamp: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }),
       message,
       type
     };
     this.logs.unshift(entry);
     if (this.logs.length > 50) this.logs.pop();
     
-    const prefix = `[PortfolioManager]`;
+    const prefix = `[PortfolioManager:${this.name}]`;
     if (type === 'warn') console.warn(`${prefix} ${message}`);
     else if (type === 'error') console.error(`${prefix} ${message}`);
     else console.log(`${prefix} ${message}`);
     
-    // Optional: Persist logs
-    saveSetting('portfolio_logs', this.logs);
+    // Persist log to fleet-specific table
+    addFleetLog(this.managerId, message, type);
   }
 
   async init() {
-    const saved = getSetting('portfolio_config');
-    if (saved) {
-      this.config = { ...this.config, ...saved };
+    const fleet = getFleetById(this.managerId);
+    if (fleet) {
+      this.name = fleet.name;
+      this.config = { ...this.config, ...fleet.config };
+      this.isRunning = fleet.isRunning;
     }
-    this.logs = getSetting('portfolio_logs') || [];
-    this.log('Initialized and ready.');
+    
+    // Load recent logs from DB
+    const savedLogs = getFleetLogs(this.managerId, 50);
+    this.logs = savedLogs.map(l => ({
+      timestamp: l.timestamp,
+      message: l.message,
+      type: l.type
+    }));
+
+    this.log(`Fleet "${this.name}" initialized and ready.`);
   }
 
   async start() {
@@ -68,8 +82,22 @@ export class PortfolioManager {
 
   async updateConfig(newConfig) {
     const wasAutonomous = this.config.isAutonomous;
+    
+    // Support updating Name if provided
+    if (newConfig.name) {
+      this.name = newConfig.name;
+      delete newConfig.name;
+    }
+
     this.config = { ...this.config, ...newConfig };
-    saveSetting('portfolio_config', this.config);
+    
+    // Persist to fleets table
+    upsertFleet({
+      id: this.managerId,
+      name: this.name,
+      config: this.config,
+      isRunning: this.isRunning
+    });
     
     // If just enabled, trigger tick immediately
     if (!wasAutonomous && this.config.isAutonomous && this.isRunning) {
@@ -118,6 +146,9 @@ export class PortfolioManager {
         }
       }
 
+      // 2.5 Orphaned Bot Cleanup (Ghost Bot Prevention)
+      this._cleanupOrphanedBots();
+
       // 3. Gap Filling (Day 0 & Beyond)
       const currentFleetCount = Array.from(this.botManager.bots.values()).filter(b => b.isRunning && b.config.managedBy === this.managerId).length;
       if (currentFleetCount < this.config.targetBotCount) {
@@ -139,66 +170,128 @@ export class PortfolioManager {
     const binanceCfg = loadBinanceConfig();
     if (!binanceCfg.openRouterKey) return;
 
-    // A. AI Scan for best symbols
+    // A. AI Scan for best symbols + Quantitative Data
     const tickers = await this.exchange.get24hTickers();
-    const topByVol = tickers
+    let topByVol = tickers
       .filter((t) => t.symbol.endsWith('USDT'))
       .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-      .slice(0, 50);
+      .slice(0, 40);
 
-    // Filter out symbols that already have an ACTIVE bot (autonomous or manual)
+    // FETCH OI for top candidates (Batch fetch is better but we'll do controlled parallel)
+    this.log(`Fetching Mikrostructure for top 40 candidates...`);
+    const enhancedTickers = await Promise.all(topByVol.map(async (t) => {
+      try {
+        const oiData = await this.exchange.getOpenInterest(t.symbol);
+        const oiStats = await this.exchange.getOpenInterestStatistics(t.symbol, '15m', 96); // ~24h
+        
+        // Calculate 24h OI Delta
+        const startOi = oiStats.length > 0 ? parseFloat(oiStats[0].sumOpenInterest) : parseFloat(oiData.openInterest);
+        const deltaPct = ((parseFloat(oiData.openInterest) - startOi) / startOi) * 100;
+        
+        return { 
+          ...t, 
+          oi: parseFloat(oiData.openInterest), 
+          oiValue: parseFloat(oiData.openInterest) * parseFloat(t.lastPrice),
+          oi24hDelta: deltaPct 
+        };
+      } catch (e) {
+        return { ...t, oi: 0, oi24hDelta: 0 };
+      }
+    }));
+
+    // Filter out active bots
     const activeSymbols = Array.from(this.botManager.bots.values())
       .filter(b => b.isRunning)
       .map(b => b.config.symbol);
       
-    const huntGoal = `Find ${count} best coins for my ${this.config.riskMode} fleet strategy. Avoid: ${activeSymbols.join(', ')}`;
-    const recommendations = await huntBestSymbols(topByVol, huntGoal, binanceCfg.openRouterKey, binanceCfg.openRouterModel);
+    const huntGoal = `Find ${count} best coins for my ${this.config.riskMode} fleet strategy. Prioritize high OI growth + price action alignment. Avoid: ${activeSymbols.join(', ')}`;
+    const preferredModel = this.config.aiModel || binanceCfg.openRouterModel;
+    const recommendations = await huntBestSymbols(enhancedTickers, huntGoal, binanceCfg.openRouterKey, preferredModel);
     
-    // B. Deploy recommended symbols
-    const toStart = recommendations.slice(0, count);
-    const totalScore = toStart.reduce((sum, r) => sum + (r.score || 70), 0);
+    const item = recommendations[0]; // Take best choice for now to be safe
+    if (!item) {
+      this.log('AI could not find suitable coins matching strategy criteria.');
+      return;
+    }
+
+    const totalScore = recommendations.slice(0, count).reduce((sum, r) => sum + (r.score || 70), 0);
     const averageBudget = this.config.totalBudget / this.config.targetBotCount;
 
-    for (const item of toStart) {
-      // Re-verify symbol hasn't been started in THIS loop instance
-      const currentBots = Array.from(this.botManager.bots.values());
-      if (currentBots.some(b => b.config.symbol === item.symbol && b.isRunning)) continue;
+    for (const item of recommendations.slice(0, count)) {
+      // 🕵️ Double Check: Is this symbol actually free?
+      const existing = Array.from(this.botManager.bots.values()).find(b => b.config.symbol === item.symbol && b.isRunning);
+      if (existing) {
+        if (!existing.config.managedBy) {
+          this.log(`Adopting orphaned bot for ${item.symbol}...`);
+          existing.config.managedBy = this.managerId;
+        }
+        continue;
+      }
 
-      this.log(`Analyzing ${item.symbol} for deployment...`);
+      this.log(`Recruiting ${item.symbol}: AI Score ${item.score || 'N/A'}. Reasoning: ${item.reason || 'Technical breakout'}`);
+      this.currentAction = `🚀 Deploying ${item.symbol}...`;
       
-      const klines = await this.exchange.getKlines(item.symbol, '1h', 100);
-      const closes = klines.map(k => parseFloat(k[4]));
-      const recommendedStrategy = await recommendBot(
-        closes, this.config.riskMode, 
-        binanceCfg.openRouterKey, binanceCfg.openRouterModel, 
-        item.symbol
-      );
-
-      const weight = (item.score || 70) / totalScore;
-      const allocatedBudget = (averageBudget * count) * weight;
-      
-      const botConfig = {
-        symbol: item.symbol,
-        strategy: recommendedStrategy.strategy,
-        interval: recommendedStrategy.interval || '15m',
-        leverage: recommendedStrategy.leverage || 10,
-        positionSizeUSDT: allocatedBudget,
-        maxLossUSDT: allocatedBudget * 0.05, 
-        tpPercent: recommendedStrategy.tp || 1.5,
-        slPercent: recommendedStrategy.sl || 1.0,
-        aiReason: `[Portfolio Fleet] ${recommendedStrategy.reason || 'Autonomous Recruitment'}`, // Force marker
-        aiModel: binanceCfg.openRouterModel,
-        aiType: this.config.riskMode,
-        exchange: 'binance_testnet',
-        managedBy: this.managerId // CRITICAL: Tag as autonomous for UI and scaling logic
-      };
-
       try {
+        const klines = await this.exchange.getKlines(item.symbol, '1h', 100);
+        const closes = klines.map(k => parseFloat(k[4]));
+        const fr = await this.exchange.getFundingRate(item.symbol);
+        const oi = await this.exchange.getOpenInterest(item.symbol);
+        
+        const microstructure = {
+          fundingRate: (parseFloat(fr.lastFundingRate) * 100).toFixed(4) + '%',
+          markPrice: fr.markPrice,
+          openInterestUSDT: (parseFloat(oi.openInterest) * parseFloat(fr.markPrice)).toLocaleString() + ' USDT',
+          nextFundingTime: (fr.nextFundingTime && !isNaN(new Date(fr.nextFundingTime))) ? new Date(fr.nextFundingTime).toISOString() : 'N/A'
+        };
+
+        const preferredModel = this.config.aiModel || binanceCfg.openRouterModel;
+        const recommendedStrategy = await recommendBot(
+          closes, this.config.riskMode, 
+          binanceCfg.openRouterKey, preferredModel, 
+          item.symbol,
+          microstructure
+        );
+
+        const weight = (item.score || 70) / totalScore;
+        const allocatedBudget = (averageBudget * count) * weight;
+        
+        const botConfig = {
+          symbol: item.symbol,
+          strategy: recommendedStrategy.strategy,
+          interval: recommendedStrategy.interval || '15m',
+          leverage: recommendedStrategy.leverage || 10,
+          positionSizeUSDT: allocatedBudget,
+          maxLossUSDT: allocatedBudget * 0.05, 
+          tpPercent: recommendedStrategy.tp || 1.5,
+          slPercent: recommendedStrategy.sl || 1.0,
+          // Use detailed entry reason if provided, fallback to summary
+          aiReason: `[Quant Fleet] ${recommendedStrategy.entry_reason || recommendedStrategy.reason || 'Microstructure analysis'}`,
+          aiModel: this.config.aiModel || binanceCfg.openRouterModel,
+          aiType: this.config.riskMode,
+          exchange: 'binance_testnet',
+          managedBy: this.managerId 
+        };
+
         await this.botManager.startBot(botConfig);
         this.log(`Successfully recruited ${item.symbol} (${recommendedStrategy.strategy})`, 'info');
       } catch (e) {
-        this.log(`Failed to start bot for ${item.symbol}: ${e.message}`, 'warn');
+        this.log(`Failed deep analysis/start for ${item.symbol}: ${e.message}`, 'warn');
       }
+    }
+  }
+
+  _cleanupOrphanedBots() {
+    const allBots = Array.from(this.botManager.bots.values());
+    // Find running bots with no managedBy but that should probably be under us or are ghosts
+    const orphans = allBots.filter(b => b.isRunning && !b.config.managedBy);
+    
+    for (const bot of orphans) {
+       // If we already have a bot for this symbol, this one is a ghost
+       const ourBot = allBots.find(b => b.isRunning && b.config.managedBy === this.managerId && b.config.symbol === bot.config.symbol);
+       if (ourBot && ourBot.id !== bot.id) {
+         this.log(`Cleaning up ghost bot ${bot.id} for ${bot.config.symbol}`, 'warn');
+         this.botManager.stopBot(bot.id);
+       }
     }
   }
 }

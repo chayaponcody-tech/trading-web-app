@@ -158,4 +158,38 @@ export class BinanceTestnetService {
       }).on('error', reject);
     });
   }
+
+  // --- Public Microstructure Data (Production for real signals) ---
+  
+  async _publicGet(url) {
+    return new Promise((resolve, reject) => {
+      https.get(url, (res) => {
+        let body = '';
+        res.on('data', (chunk) => body += chunk);
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(body);
+            if (res.statusCode === 200) resolve(json);
+            else reject(new Error(`Public API Error ${res.statusCode}: ${json.msg || body}`));
+          } catch (e) { reject(e); }
+        });
+      }).on('error', reject);
+    });
+  }
+
+  async getOpenInterest(symbol) {
+    const PROD_URL = 'https://fapi.binance.com';
+    return this._publicGet(`${PROD_URL}/fapi/v1/openInterest?symbol=${symbol.toUpperCase()}`);
+  }
+
+  async getFundingRate(symbol) {
+    const PROD_URL = 'https://fapi.binance.com';
+    return this._publicGet(`${PROD_URL}/fapi/v1/premiumIndex?symbol=${symbol.toUpperCase()}`);
+  }
+
+  async getOpenInterestStatistics(symbol, period = '15m', limit = 10) {
+    // Note: This endpoint provides historical OI statistics
+    const PROD_URL = 'https://fapi.binance.com'; 
+    return this._publicGet(`${PROD_URL}/futures/data/openInterestHist?symbol=${symbol.toUpperCase()}&period=${period}&limit=${limit}`);
+  }
 }

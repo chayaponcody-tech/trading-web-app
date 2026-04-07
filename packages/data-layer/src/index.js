@@ -4,6 +4,7 @@ export {
   getTradeMemory, appendTrade, getAllTradesFromBots, 
   saveMistake, getRecentMistakes 
 } from './repositories/tradeRepository.js';
+export * from './repositories/fleetRepository.js';
 export * from './repositories/configRepository.js';
 export * from './repositories/walletRepository.js';
 export * from './repositories/telegramRepository.js';

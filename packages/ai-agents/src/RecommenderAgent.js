@@ -16,16 +16,22 @@ const AI_TYPES = {
 /**
  * Get single-bot recommendation for a symbol.
  */
-export async function recommendBot(closePrices, aiType, apiKey, model, symbol) {
+export async function recommendBot(closePrices, aiType, apiKey, model, symbol, microstructureData = null) {
   const type = AI_TYPES[aiType] || AI_TYPES.confident;
-  const prompt = `You are a QUANT RISK MANAGER. Analyze ${symbol} price history:
+  const prompt = `You are a QUANT RISK MANAGER. Analyze ${symbol} data:
+PRICE HISTORY:
 ${JSON.stringify(closePrices.slice(-60))}
+
+MICROSTRUCTURE:
+${microstructureData ? JSON.stringify(microstructureData) : 'N/A (Standard TA only)'}
 
 TASK: Suggest ONE strategy using the ${type.desc} approach.
 
 CRITICAL RISK MANAGEMENT:
-1. LEVERAGE: Suggest a safe leverage (1-20x) based on current volatility.
-2. SCALING IN (ซอยไม้): Suggest 2-3 entry steps. 
+1. **FUNDING RATE**: If positive (> 0.01%), reduce leverage or avoid LONG entries (reversal risk). If negative, watch for short-squeeze opportunities.
+2. **OI TREND**: Confirm entry with OI. If price is near TA support but OI is dropping, the support may break.
+3. **LEVERAGE**: Suggest a safe leverage (1-20x). Reduce leverage if Funding is high or volatility is spiked.
+4. **SCALING IN (ซอยไม้)**: Suggest 2-3 entry steps.
    - First step is always MARKET.
    - Other steps are LIMIT orders at a specific percentage offset from current price.
    - Assign a weight (percentage of capital) to each step.
@@ -38,13 +44,12 @@ RESPONSE FORMAT (strict JSON only):
   "tp": 1.5,
   "sl": 1.0,
   "leverage": 10,
+  "entry_reason": "เหตุผลเชิงลึก (ภาษาไทย) โดยระบุปัจจัยทางเทคนิค + Microstructure (Funding/OI) ถ้ามี",
   "entry_steps": [
     { "type": "MARKET", "weightPct": 50, "offsetPct": 0 },
     { "type": "LIMIT", "weightPct": 50, "offsetPct": -0.5 }
   ],
-  "expected_duration_min": 240,
-  "ai_check_interval": 30,
-  "reason": "อธิบายสั้นๆ ว่าทำไมต้องเข้าแบบนี้ และทำไมใช้ Leverage เท่านี้",
+  "reason": "สรุปสั้นๆ สำหรับระบบแจ้งเตือน (Thai)",
   "grid_upper": null,
   "grid_lower": null
 }

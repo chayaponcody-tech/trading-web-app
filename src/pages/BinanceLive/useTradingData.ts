@@ -6,6 +6,7 @@ import { API, type Bot, type BinanceKeys } from './types';
 
 export function useTradingData() {
   const [bots, setBots] = useState<Bot[]>([]);
+  const [fleets, setFleets] = useState<any[]>([]);
   const [accountInfo, setAccountInfo] = useState<any>(null);
   const [tradeMemory, setTradeMemory] = useState<any[]>([]);
   const [tradeHistory, setTradeHistory] = useState<any[]>([]);
@@ -24,6 +25,13 @@ export function useTradingData() {
       const res = await fetch(`${API}/api/forward-test/status`);
       const data = await res.json();
       setBots(Array.isArray(data) ? data.filter((b: Bot) => b.config.exchange === 'binance_testnet') : []);
+    } catch {}
+  };
+
+  const fetchFleets = async () => {
+    try {
+      const res = await fetch(`${API}/api/portfolio/fleets`);
+      if (res.ok) setFleets(await res.json());
     } catch {}
   };
 
@@ -80,6 +88,7 @@ export function useTradingData() {
 
   useEffect(() => {
     fetchStatus();
+    fetchFleets();
     fetchBinanceConfig();
     fetchAccount();
     if (activeTab === 'memory') fetchMemory();
@@ -88,6 +97,7 @@ export function useTradingData() {
 
     pollRef.current = window.setInterval(() => {
       fetchStatus();
+      fetchFleets();
       fetchAccount();
       if (activeTab === 'memory') fetchMemory();
       if (activeTab === 'analytics') fetchAnalytics();
@@ -97,6 +107,7 @@ export function useTradingData() {
 
   return {
     bots, setBots,
+    fleets, setFleets,
     accountInfo,
     binanceKeys, setBinanceKeys,
     tradeMemory,
@@ -104,6 +115,6 @@ export function useTradingData() {
     fetchingHistory,
     analyticsData,
     activeTab, setActiveTab,
-    fetchStatus, fetchAccount, fetchHistory, fetchMemory, fetchAnalytics,
+    fetchStatus, fetchAccount, fetchHistory, fetchMemory, fetchAnalytics, fetchFleets,
   };
 }

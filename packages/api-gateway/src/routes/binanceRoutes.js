@@ -279,14 +279,14 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
       
       // Fetch microstructure data (OI and Funding)
       const [oi, funding] = await Promise.all([
-        svc.fetchOpenInterest(symbol).catch(() => null),
-        svc.fetchFundingRate(symbol).catch(() => null)
+        svc.getOpenInterest(symbol).catch(() => null),
+        svc.getFundingRate(symbol).catch(() => null)
       ]);
 
       res.json({
         symbol,
-        openInterest: oi?.openInterestAmount || oi?.info?.sumOpenInterest || oi || 0,
-        fundingRate: funding?.fundingRate || 0,
+        openInterest: oi?.openInterest || oi?.openInterestAmount || oi?.info?.sumOpenInterest || 0,
+        fundingRate: funding?.lastFundingRate || funding?.fundingRate || 0,
         nextFundingTime: funding?.nextFundingTime || 0,
         timestamp: Date.now()
       });

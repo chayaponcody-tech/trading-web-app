@@ -13,7 +13,7 @@ import { API, type Bot } from './types';
 
 export default function BinanceLive() {
   const {
-    bots, accountInfo, binanceKeys,
+    bots, fleets, accountInfo, binanceKeys,
     tradeMemory, tradeHistory, fetchingHistory,
     analyticsData,
     activeTab, setActiveTab,
@@ -452,7 +452,7 @@ export default function BinanceLive() {
           </>
         )}
 
-        {activeTab === 'positions' && <PositionsTab activePositions={activePositions} bots={bots} onManualClose={handleManualClose} onRefresh={fetchAccount} onViewChart={handleViewChart} />}
+        {activeTab === 'positions' && <PositionsTab activePositions={activePositions} bots={bots} fleets={fleets} onManualClose={handleManualClose} onRefresh={fetchAccount} onViewChart={handleViewChart} />}
         {activeTab === 'analytics' && <AnalyticsTab analyticsData={analyticsData} />}
         {activeTab === 'history' && <HistoryTab tradeHistory={tradeHistory} fetchingHistory={fetchingHistory} fetchHistory={fetchHistory} />}
         {activeTab === 'tuning' && <TuningLogs />}

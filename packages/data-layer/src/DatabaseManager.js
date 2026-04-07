@@ -96,6 +96,20 @@ export function initDb() {
         aiLesson TEXT,
         recordedAt DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE TABLE IF NOT EXISTS fleets (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        config TEXT,
+        isRunning INTEGER DEFAULT 0,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS fleet_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        fleetId TEXT,
+        message TEXT,
+        type TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     // --- MIGRATIONS ---

@@ -8,7 +8,9 @@ import { NotificationService } from '../../bot-engine/src/NotificationService.js
 import { BinanceAdapter } from '../../exchange-connector/src/BinanceAdapter.js';
 import { BotManager } from '../../bot-engine/src/BotManager.js';
 import { PortfolioManager } from '../../bot-engine/src/PortfolioManager.js';
-import { loadBinanceConfig, getAllBots } from '../../data-layer/src/index.js';
+import { 
+  loadBinanceConfig, getAllBots, getAllFleets, getSetting, upsertFleet 
+} from '../../data-layer/src/index.js';
 import { PORT } from '../../shared/config.js';
 
 import { createBotRoutes }       from './routes/botRoutes.js';
@@ -34,12 +36,53 @@ const exchange = binanceConfig.apiKey && binanceConfig.apiSecret
   : null;
 
 const botManager = new BotManager(exchange, binanceConfig);
-const portfolioManager = new PortfolioManager(botManager, exchange, { managerId: 'portfolio1' });
+
+// ─── Multi-Fleet Orchestration ────────────────────────────────────────────────
+const portfolioManagers = new Map();
+
+async function initFleets() {
+  let fleets = getAllFleets();
+  
+  // Migration: If no fleets exist, try to migrate from old settings
+  if (fleets.length === 0) {
+    const oldConfig = getSetting('portfolio_config');
+    if (oldConfig) {
+        console.log('🚚 [Server] Migrating old portfolio config to new fleet system...');
+        const defaultFleet = {
+            id: 'portfolio1',
+            name: 'Main AI Fleet',
+            config: oldConfig,
+            isRunning: 1
+        };
+        upsertFleet(defaultFleet);
+        fleets = [defaultFleet];
+    }
+  }
+
+  for (const f of fleets) {
+    const pm = new PortfolioManager(botManager, exchange, { 
+        managerId: f.id, 
+        name: f.name,
+        config: f.config
+    });
+    await pm.init();
+    portfolioManagers.set(f.id, pm);
+    if (f.isRunning) pm.start();
+  }
+  console.log(`📡 [Server] Multi-Fleet Active: ${portfolioManagers.size} fleets initialized.`);
+}
 
 // Initialize Notifications
 const notificationService = new NotificationService(binanceConfig);
 botManager.setNotificationService(notificationService);
-notificationService.startPolling(botManager, portfolioManager);
+
+// Load and resume persisted bots
+botManager.loadBots(getAllBots());
+
+// Start all fleets
+const fleetsInitPromise = initFleets().then(() => {
+    notificationService.startPolling(botManager, Array.from(portfolioManagers.values()));
+});
 
 // Pre-cache exchange symbol rules (best-effort)
 if (exchange) {
@@ -48,18 +91,12 @@ if (exchange) {
     .catch((e) => console.warn('[Gateway] Could not prefetch symbol rules:', e.message));
 }
 
-// Load and resume persisted bots
-botManager.loadBots(getAllBots());
-
-// Start Portfolio Manager
-portfolioManager.init().then(() => portfolioManager.start());
-
 // ─── Routes ───────────────────────────────────────────────────────────────────
 app.use('/api/bots',      createBotRoutes(botManager));
 app.use('/api/ai',        createAiRoutes(botManager, binanceConfig));
-app.use('/api/binance',   createBinanceRoutes(botManager, portfolioManager, binanceConfig));
+app.use('/api/binance',   createBinanceRoutes(botManager, Array.from(portfolioManagers.values())[0], binanceConfig)); // Fallback for binance routes
 app.use('/api/config',    createConfigRoutes(botManager));
-app.use('/api/portfolio', createPortfolioRoutes(portfolioManager));
+app.use('/api/portfolio', createPortfolioRoutes(portfolioManagers, { botManager, exchange }));
 app.use('/api/wallet',    createWalletRoutes());
 
 

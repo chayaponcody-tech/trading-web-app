@@ -8,23 +8,31 @@ export async function huntBestSymbols(tickers, goal, apiKey, model) {
     s: t.symbol,
     c: t.priceChangePercent,
     v: Math.round(t.quoteVolume / 1000000) + 'M',
-    p: t.lastPrice
+    p: t.lastPrice,
+    oi: t.oi ? Math.round(t.oi / 1000000) + 'M' : 'N/A', // Open Interest in Millions
+    oi24h: t.oi24hDelta ? (t.oi24hDelta > 0 ? '+' : '') + t.oi24hDelta.toFixed(1) + '%' : 'N/A' // OI 24h Change
   }));
 
-  const prompt = `You are a High-Frequency Trading Analyst.
+  const prompt = `You are a High-Frequency Trading Analyst specializing in QUANTITATIVE MICROSTRUCTURE.
 GOAL: ${goal}
 
-I have 40 top coins from Binance (24h data):
+I have 40 top coins from Binance (24h Price/Vol + Open Interest data):
 ${JSON.stringify(tickerSummary)}
 
 TASK:
 Identify the TOP 5 most suitable coins that fit the goal perfectly.
-For each selection, provide a brief but ANALYTICAL reason in Thai, mentioning why its volume or price behavior is attractive for the strategy.
+
+QUANTITATIVE GUIDELINES:
+1. **OI DELTA**: Price Up + OI Up = High conviction BULLISH (New capital entering). Price Up + OI Down = Short Covering (Weak rally).
+2. **LIQUIDITY**: Prioritize symbols with high Quote Volume AND growing Open Interest.
+3. **MICROSTRUCTURE**: Look for anomalies where OI is rising much faster than price (potential breakout).
+
+For each selection, provide a brief but ANALYTICAL reason in Thai, explicitly mentioning the price-OI relationship.
 
 RESPONSE FORMAT (strict JSON only):
 {
   "recommendations": [
-    { "symbol": "SYMBOL", "reason": "เหตุผลเชิงเทคนิคสั้นๆ (ภาษาไทย) เช่น 'ปริมาณการซื้อขายคงที่ที่แนวรับ 1h'", "score": 1-100, "tag": "short-tag" },
+    { "symbol": "SYMBOL", "reason": "เหตุผลเชิงลึก (ภาษาไทย) เช่น 'ราคาขึ้นพร้อม OI +15% ยืนยันแรงซื้อจริง'", "score": 1-100, "tag": "quant-pick" },
     ...
   ]
 }

@@ -558,10 +558,11 @@ export class BotManager {
     const bot = this.bots.get(botId);
     if (!bot) return;
 
+    const preferredModel = bot.config.aiModel || this.config.openRouterModel;
     const result = await reviewBot(
       bot, closes,
       this.config.openRouterKey,
-      this.config.openRouterModel
+      preferredModel
     );
 
     if (result.shouldUpdate) {
@@ -575,15 +576,15 @@ export class BotManager {
 
     bot.aiReason    = result.reason;
     bot.lastAiCheck = new Date().toISOString();
-    bot.lastAiModel = this.config.openRouterModel;
+    bot.lastAiModel = preferredModel;
 
     // Record AI Review in history
     bot.aiHistory = bot.aiHistory || [];
     bot.aiHistory.push({
-      time: new Date().toISOString().replace('T', ' ').split('.')[0],
+      time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }), // Formats as YYYY-MM-DD HH:MM:SS in local BK time
       message: result.reason,
       decision: result.shouldUpdate ? 'UPDATED' : 'STAY',
-      model: bot.lastAiModel
+      model: preferredModel
     });
 
     console.log(`[Bot ${botId}] AI Review: ${result.shouldUpdate ? '✅ Updated' : '⏸️ No change'} — ${result.reason?.slice(0, 80)}`);

@@ -169,6 +169,7 @@ export function createBotRoutes(botManager) {
           lastSignal: bot.lastSignal,
           startedAt: bot.startedAt,
           aiReason: bot.aiReason,
+          managedBy: bot.config?.managedBy || bot.managedBy || null,
           currentThought: bot.currentThought || '...',
           lastThoughtAt: bot.lastThoughtAt,
           durationMinutes: bot.config?.durationMinutes
