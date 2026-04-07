@@ -103,6 +103,62 @@ export class BotManager {
     return botId;
   }
 
+  /**
+   * Resumes bots from persistent storage.
+   * Called on startup by server.js.
+   */
+  loadBots(savedBots) {
+    if (!savedBots || !Array.isArray(savedBots)) return;
+    
+    console.log(`[BotManager] Resuming ${savedBots.length} bots from storage...`);
+    
+    for (const b of savedBots) {
+      // Re-initialize runtime state
+      b.isRunning = true;
+      b.openPositions = b.openPositions || [];
+      b.trades = b.trades || [];
+      
+      this.bots.set(b.id, b);
+      this._scheduleBot(b.id);
+      
+      console.log(`[BotManager] Resumed ${b.id}: ${b.config.symbol} (${b.config.strategy})`);
+    }
+
+    if (this.notificationService && savedBots.length > 0) {
+      this.notificationService.send(`🕯️ *System Resumed:* กู้คืนบอทสำเร็จ \`${savedBots.length}\` ตัว เข้าสู่ระบบจัดการอัตโนมัติแล้วค่ะ`);
+    }
+  }
+
+  /**
+   * Resurrects active bots from the database.
+   * Call this on system startup.
+   */
+  async loadActiveBots() {
+    try {
+      const { getActiveBots } = await import('../../data-layer/src/repositories/botRepository.js');
+      const savedBots = getActiveBots();
+      
+      if (!savedBots || savedBots.length === 0) return;
+      
+      console.log(`[BotManager] Attempting to resurrect ${savedBots.length} active bots from DB...`);
+      
+      for (const b of savedBots) {
+        // Essential runtime re-initialization
+        b.isRunning = true;
+        
+        this.bots.set(b.id, b);
+        this._scheduleBot(b.id);
+        console.log(`[BotManager] Resurrected ${b.id}: ${b.config.symbol}`);
+      }
+      
+      if (this.notificationService) {
+        this.notificationService.send(`🕯️ *System Recovery:* กู้คืนบอทสำเร็จ \`${savedBots.length}\` ตัว เข้าสู่ระบบจัดการอัตโนมัติแล้วค่ะ`);
+      }
+    } catch (e) {
+      console.error('[BotManager] Failed to resurrect bots:', e.message);
+    }
+  }
+
   stopBot(botId) {
     const timer = this.timers.get(botId);
     if (timer) { clearInterval(timer); this.timers.delete(botId); }

@@ -60,51 +60,44 @@ export default function SystemOverview() {
       <section>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2rem' }}>
           <Activity size={24} color="var(--accent-primary)" />
-          <h2 className="m-0">Bot Lifecycle: การทำงานของระบบ</h2>
+          <h2 className="m-0">Autonomous Fleet Lifecycle: ตั้งแต่เลือกกองยานจนเข้าออเดอร์</h2>
         </div>
         
         <div className="lifecycle-grid" style={{ 
           display: 'grid', 
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
-          gap: '1rem',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
+          gap: '1.25rem',
           position: 'relative'
         }}>
           <LifecycleStep 
             index="01"
             icon={<Search size={28} color="#00d1ff" />}
-            title="Scanning"
-            desc="AI สแกนหาโอกาสในตลาดตามโหมดที่เลือก (Precision, Scout, หรือ Grid)"
+            title="Market Scouting"
+            desc="ยานแม่สแกน 40 เหรียญที่มี Volume สูงสุด คัดกรองเหรียญที่มีความผันผวนและเข้าเงื่อนไขเทรดเบื้องต้น"
             color="#00d1ff"
           />
           <LifecycleStep 
             index="02"
-            icon={<Cpu size={28} color="#faad14" />}
-            title="AI Reflection"
-            desc="เมื่อ Indicator ให้สัญญาณ AI จะวิเคราะห์ความสมเหตุสมผลของตลาดก่อนเข้าเทรด"
+            icon={<BarChart3 size={28} color="#faad14" />}
+            title="Alpha Hunting"
+            desc="ดึงข้อมูล Microstructure (OI Delta, Funding Rate) จากตลาดจริงมาวิเคราะห์ 'ความแรง' ของกองกำลังฝั่งนั้นๆ"
             color="#faad14"
             isAI
           />
           <LifecycleStep 
             index="03"
-            icon={<TrendingUp size={28} color="#0ecb81" />}
-            title="Execution"
-            desc="ยิงออเดอร์เข้า Binance Live Sim พร้อมคำนวณ Quantity และ Leverage อัตโนมัติ"
-            color="#0ecb81"
+            icon={<BrainCircuit size={28} color="#faad14" />}
+            title="AI Reasoning"
+            desc="AI (DeepSeek/Gemini) ประมวลผลข้อมูลระดับวินาที เพื่อให้เหตุผลและอนุมัติการเข้าเทรดเป็นภาษาไทย"
+            color="#faad14"
+            isAI
           />
           <LifecycleStep 
             index="04"
-            icon={<ShieldCheck size={28} color="#ff4d4f" />}
-            title="Portfolio Shield"
-            desc="เฝ้าระวัง drawdown แบบ Real-time หากขาดทุนเกินวงเงิน ระบบจะหยุดบอททันที"
-            color="#ff4d4f"
-          />
-          <LifecycleStep 
-            index="05"
-            icon={<RefreshCcw size={28} color="#a855f7" />}
-            title="AI Evolution"
-            desc="AI รีวิวผลงานทุก 30 นาที เพื่อปรับเปลี่ยนกลยุทธ์ให้ชนะตลาดอยู่เสมอ"
-            color="#a855f7"
-            isAI
+            icon={<Layers size={28} color="#0ecb81" />}
+            title="Layered Entry"
+            desc="ยิงออเดอร์แบบลำดับไม้ (Grid/Scalp Layers) ลง Binance Live Sim เพื่อให้ได้ต้นทุนเฉลี่ยที่ได้เปรียบ"
+            color="#0ecb81"
           />
         </div>
       </section>
@@ -115,42 +108,32 @@ export default function SystemOverview() {
         
         <div style={{ position: 'relative', zIndex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '3rem', justifyContent: 'center' }}>
-            <Layers size={24} color="var(--accent-primary)" />
-            <h2 className="m-0" style={{ fontSize: '1.75rem' }}>Technical Workflow Pipeline</h2>
+            <Cpu size={24} color="var(--accent-primary)" />
+            <h2 className="m-0" style={{ fontSize: '1.75rem' }}>Multi-Fleet Orchestration Architecture (Phase 2)</h2>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', justifyContent: 'center', alignItems: 'flex-start' }}>
-            <WorkflowStep 
-              title="Exchange Data Feed"
-              tag="INGESTION"
-              desc="BinanceAdapter ดึงข้อมูล Klines (1m - 1h) และ Real-time Tickers ทุก 5-30 วินาที"
-              icon={<Activity size={24} />}
-            />
-            <div style={{ display: 'flex', alignItems: 'center', color: 'rgba(255,255,255,0.1)', padding: '1rem 0' }}><ArrowRight size={20} /></div>
-            
-            <WorkflowStep 
-              title="Vector Signal Engine"
-              tag="ANALYSIS"
-              desc="คำนวณ Indicators (EMA, RSI, BB, Volume Flow) และสร้าง Trading Signals ขั้นต้น"
-              icon={<Zap size={24} />}
-            />
-            <div style={{ display: 'flex', alignItems: 'center', color: 'rgba(255,255,255,0.1)', padding: '1rem 0' }}><ArrowRight size={20} /></div>
-
-            <WorkflowStep 
-              title="Cognitive Layer (AI)"
-              tag="INTELLIGENCE"
-              desc="OpenRouter (DeepSeek/Gemini) ทำการ Reflection วิเคราะห์ Context เพื่อลด False Signals"
-              icon={<BrainCircuit size={24} />}
-              isFeatured
-            />
-            <div style={{ display: 'flex', alignItems: 'center', color: 'rgba(255,255,255,0.1)', padding: '1rem 0' }}><ArrowRight size={20} /></div>
-
-            <WorkflowStep 
-              title="Execution & Persist"
-              tag="ACTION"
-              desc="บันทึกผลลง SQLite Database และยิงคำสั่งผ่าน Binance API พร้อมส่ง Log ไปที่ Telegram"
-              icon={<RefreshCcw size={24} />}
-            />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '2rem' }}>
+             <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1.5rem', borderRadius: '16px', borderLeft: '4px solid #00d1ff' }}>
+                <h4 style={{ color: '#00d1ff', marginBottom: '1rem' }}>🚢 Fleet Management</h4>
+                <p style={{ fontSize: '0.85rem', color: '#aaa', lineHeight: 1.6 }}>
+                  ระบบทำหน้าที่เป็นจอมทัพ (Commander) คุมกองยานแต่ละลำ (เช่น AI Scouter, AI Grid) แยกจากกัน 
+                  แต่ละลำจะมีเป้าหมายและงบประมาณ (Budget) ที่ AI จัดสรรให้ตามสภาวะตลาด
+                </p>
+             </div>
+             <div style={{ background: 'rgba(250,173,20,0.05)', padding: '1.5rem', borderRadius: '16px', borderLeft: '4px solid #faad14' }}>
+                <h4 style={{ color: '#faad14', marginBottom: '1rem' }}>🧠 Microstructure Alpha</h4>
+                <p style={{ fontSize: '0.85rem', color: '#aaa', lineHeight: 1.6 }}>
+                   ใช้ข้อมูล <b>Open Interest Delta</b> เพื่อดูว่ามีการยัดเงินใหม่เข้ามาในตลาดหรือไม่ และใช้ <b>Funding Rate</b> 
+                   เพื่อตรวจสอบสภาวะความได้เปรียบ-เสียเปรียบของค่าธรรมเนียมก่อนยิงออเดอร์
+                </p>
+             </div>
+             <div style={{ background: 'rgba(14,203,129,0.05)', padding: '1.5rem', borderRadius: '16px', borderLeft: '4px solid #0ecb81' }}>
+                <h4 style={{ color: '#0ecb81', marginBottom: '1rem' }}>🧹 Auto Sanitizer</h4>
+                <p style={{ fontSize: '0.85rem', color: '#aaa', lineHeight: 1.6 }}>
+                   ระบบเฝ้าระวังตำแหน่งค้าง (Ghost Positions) หากพบบอทที่ไม่ระบุเจ้าของหรือกำพร้า 
+                   ระบบจะทำการปิดตำแหน่งทันทีเพื่อความปลอดภัยในทรัพย์สินระดับพอร์ต
+                </p>
+             </div>
           </div>
         </div>
       </section>
@@ -159,18 +142,17 @@ export default function SystemOverview() {
       <section style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
         <div className="glass-panel" style={{ padding: '2rem', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div style={{ width: '50px', height: '50px', background: 'rgba(0, 209, 255, 0.1)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Layers size={28} color="#00d1ff" />
+            <Zap size={28} color="#00d1ff" />
           </div>
           <div>
             <h3 style={{ fontSize: '1.5rem', marginBottom: '0.75rem' }}>AI Portfolio Manager</h3>
             <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              เปรียบเสมือน "ผู้จัดการกองทุน" ที่คอยคุมภาพรวมของพอร์ตทุ่มเทในการค้นหาเหรียญที่มีความน่าจะเป็นสูง 
-              และกระจายงบประมาณ (Budget Allocation) ไปยังบอทแต่ละตัวอย่างเหมาะสม เพื่อลดความเสี่ยงจากการเทรดเหรียญเดียว
+               บริหารจัดการ "งบประมาณกองยาน" โดยใช้ปริมาณเงินรวมและอัตราความเสี่ยง (Risk Mode) มาเป็นตัวตั้งในการเปิดบอทแต่ละเหรียญ
             </p>
             <ul style={{ paddingLeft: '1.25rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
-              <li>บริหารจัดการ Active Bots ให้ตรงตามจำนวนที่ตั้งเป้าไว้</li>
-              <li>ควบคุมระดับความเสี่ยง (Risk Modes) ได้หลากหลาย</li>
-              <li>ระบบหยุดอัตโนมัติ (Global Stop Loss) ระดับพอร์ต</li>
+              <li>กระจายเหรียญตามความร้อนแรง (Volume Flow Integration)</li>
+              <li>ระบบหยุดอัตโนมัติ (Global Stop Loss) แบบ Real-time</li>
+              <li>รองรับการเทรดหลาย Fleets พร้อมกันแยกข้ามเหรียญ</li>
             </ul>
           </div>
         </div>
@@ -180,15 +162,14 @@ export default function SystemOverview() {
             <Target size={28} color="#faad14" />
           </div>
           <div>
-            <h3 style={{ fontSize: '1.5rem', marginBottom: '0.75rem' }}>AI Reflection Agent</h3>
+            <h3 style={{ fontSize: '1.5rem', marginBottom: '0.75rem' }}>Microstructure Reflection</h3>
             <p style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              เปรียบเสมือน "ที่ปรึกษาการเทรด" ที่คอยกลั่นกรองสัญญาณทางเทคนิค (Indicator Signals) 
-              AI จะพิจารณา Volatility และ Market Structure เพื่อตรวจสอบว่าสัญญาณที่เกิดขึ้นนั้นเป็น "สัญญาณหลอก" (Fake-out) หรือไม่
+               วิเคราะห์ความลึกของตลาด (Market Depth) ผ่านการตรวจสอบ OI และ Funding Rate จริงจาก Binance Production เพื่อหาจุดได้เปรียบทางเชิงปริมาณ (Quantitative Edge)
             </p>
             <ul style={{ paddingLeft: '1.25rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
-              <li>ลดการเทรดในสภาวะตลาดไซด์เวย์ (Range-bound rejection)</li>
-              <li>เพิ่ม Win Rate ด้วยการวิเคราะห์ Context ที่ตัวบ่งชี้มองไม่เห็น</li>
-              <li>แสดงเหตุผลที่อนุมัติหรือปฏิเสธการเทรดเป็นภาษาไทย</li>
+              <li>กรอง "สัญญาณหลอก" ด้วยการดู OI Flow (Money Flow)</li>
+              <li>ตรวจสภาพความอิ่มตัวของฝั่ง Long/Short ด้วย Funding Rate</li>
+              <li>แสดงเหตุผลที่ AI เลือกเล่นไม้ต้นทุนต่ำให้พอร์ต</li>
             </ul>
           </div>
         </div>
@@ -197,27 +178,27 @@ export default function SystemOverview() {
       {/* 4. Core Capabilities */}
       <section>
         <div style={{ textAlign: 'center', marginBottom: '3rem' }}>
-           <h2 style={{ fontSize: '2rem' }}>เครื่องมือสำหรับเทรดเดอร์มือโปร</h2>
-           <p className="text-muted">ครบครันทุกความต้องการ ตั้งแต่การทดสอบไปจนถึงการรันจริง</p>
+           <h2 style={{ fontSize: '2rem' }}>เครื่องมือวิเคราะห์กองยาน</h2>
+           <p className="text-muted">ครบเครื่องเรื่องการเฝ้าระวังและการตัดสินใจเชิง AI</p>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem' }}>
           <CapabilityCard 
-            icon={<FlaskConical size={24} />}
-            title="Strategic Backtest"
-            desc="ทดสอบสมมติฐานด้วยข้อมูลย้อนหลังจริงจาก Binance ย้อนไปได้หลายร้อยแท่งเทียน"
-            link="/backtest"
+            icon={<Layers size={24} />}
+            title="Fleet Control"
+            desc="ดูภาพรวมการบริหารพอร์ตและกำไรรายกองยานผ่านหน้าจอ Portfolio หลัก"
+            link="/portfolio"
           />
           <CapabilityCard 
             icon={<Zap size={24} />}
             title="Binance Live Sim"
-            desc="เทรดในสภาพตลาดจริงด้วย Testnet Wallet สัมผัสประสบการณ์ Live Trading โดยไม่มีความเสี่ยง"
+            desc="เทรดในสภาพตลาดจริงพร้อมป้ายกำกับกองยาน (Fleet Tags) แยกระหว่าง AI กับคน"
             link="/binance-live"
           />
           <CapabilityCard 
-            icon={<BarChart3 size={24} />}
-            title="Real-time Analytics"
-            desc="ติดตาม PnL, Win Rate และลอจิกการทำงานของ AI อย่างละเอียดผ่านหน้า Dashboard"
+            icon={<Activity size={24} />}
+            title="Microstructure Logs"
+            desc="ติดตามความเคลื่อนไหวของ OI และ Funding Rate ที่บอทนำมาใช้คิดวิเคราะห์"
             link="/portfolio"
           />
         </div>
@@ -230,11 +211,11 @@ export default function SystemOverview() {
         background: 'linear-gradient(to right, rgba(0,209,255,0.05), rgba(168,85,247,0.05))',
         border: '1px solid rgba(255,255,255,0.1)'
       }}>
-        <h2 style={{ fontSize: '2rem', marginBottom: '1rem' }}>พร้อมเริ่มสร้างพอร์ตอัจฉริยะของคุณหรือยัง?</h2>
-        <p className="text-muted" style={{ marginBottom: '2rem' }}>เปิดใช้งาน Auto-Pilot แล้วให้ AI ของเราจัดลำดับพอร์ตโฟลิโอให้คุณ</p>
+        <h2 style={{ fontSize: '2rem', marginBottom: '1rem' }}>พร้อมเริ่มรันกองยานอัจฉริยะแล้วหรือยัง?</h2>
+        <p className="text-muted" style={{ marginBottom: '2rem' }}>กวดขันวินัยการเทรดด้วย AI Fleet Manager รุ่นล่าสุด</p>
         <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
           <a href="/portfolio" className="btn-primary" style={{ padding: '0.75rem 2rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-             ไปที่ AI Portfolio <ArrowRight size={18} />
+             เปิดตารางงานกองยาน <ArrowRight size={18} />
           </a>
         </div>
       </section>
