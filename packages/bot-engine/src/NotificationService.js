@@ -47,34 +47,46 @@ export class NotificationService {
      * @param {BotManager} botManager - to control bots via commands
      * @param {PortfolioManager[]} portfolioManagers - array of portfolio managers
      */
+    stopPolling() {
+        this._pollingActive = false;
+    }
+
     async startPolling(botManager, portfolioManagers = []) {
         if (!this.enabled) return;
-        
+
+        // Prevent duplicate polling loops
+        if (this._pollingActive) {
+            this.stopPolling();
+            await new Promise(r => setTimeout(r, 500));
+        }
+
         console.log('[NotificationService] Telegram Listener (Polling) Started');
         this.botManager = botManager;
         this.portfolioManagers = Array.isArray(portfolioManagers) ? portfolioManagers : [portfolioManagers];
         this.lastUpdateId = 0;
+        this._pollingActive = true;
         
-        // Loop for polling
         const poll = async () => {
+            if (!this._pollingActive) return;
             try {
                 const url = `https://api.telegram.org/bot${this.token}/getUpdates?offset=${this.lastUpdateId + 1}&timeout=30`;
                 const response = await fetch(url);
-                if (!response.ok) return;
-                
-                const data = await response.json();
-                if (data.ok && data.result.length > 0) {
-                    for (const update of data.result) {
-                        this.lastUpdateId = update.update_id;
-                        if (update.message && update.message.text) {
-                            // Save INCOMING log
-                            try { saveTelegramLog('IN', update.message.chat.id, update.message.text); } catch {}
-                            await this.handleCommand(update.message);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.ok && data.result.length > 0) {
+                        for (const update of data.result) {
+                            this.lastUpdateId = update.update_id;
+                            if (update.message && update.message.text) {
+                                try { saveTelegramLog('IN', update.message.chat.id, update.message.text); } catch {}
+                                await this.handleCommand(update.message);
+                            }
                         }
                     }
                 }
-            } catch (e) {}
-            setTimeout(poll, 3000); 
+            } catch (e) {
+                console.warn('[NotificationService] Polling error:', e.message);
+            }
+            if (this._pollingActive) setTimeout(poll, 3000);
         };
         
         poll();
@@ -88,7 +100,7 @@ export class NotificationService {
 
         // 1. Direct Commands (Fast Response)
         if (text === '/start' || text === '/help') {
-            await this.send('*👋 บอทผู้ช่วยเทรดส่วนตัวพร้อมแล้ว!*\n\n*คำสั่งพื้นฐาน (Monitoring):*\n/status - ดูสถานะบอทและทุก Fleet\n/profit - สรุปกำไรปัจจุบัน\n/history [date] - ประวัติการเทรด\n\n*คำสั่งจัดการ (Management):*\n/start_all - เปิดใช้ Auto-Pilot ทุก Fleet\n/stop_all - ปิดระบบจัดการทุก Fleet\n/start_bot <symbol> <strategy> - เปิดบอทคู่ใหม่\n/delete_bot <id> - ลบบอท');
+            await this.send('*👋 บอทผู้ช่วยเทรดส่วนตัวพร้อมแล้ว!*\n\n*คำสั่งพื้นฐาน (Monitoring):*\n/status - ดูสถานะบอทและทุก Fleet\n/fleet\\_status - สรุปข้อมูลเชิงลึกของแต่ละ Fleet\n/profit - สรุปกำไรปัจจุบัน\n/history [date] - ประวัติการเทรด\n\n*คำสั่งจัดการ (Management):*\n/start\\_all - เปิดใช้ Auto-Pilot ทุก Fleet\n/stop\\_all - ปิดระบบจัดการทุก Fleet\n/start\\_bot <symbol> <strategy> - เปิดบอทคู่ใหม่\n/delete\\_bot <id> - ลบบอท');
             return;
         }
 
@@ -220,6 +232,79 @@ export class NotificationService {
             let total = bots.reduce((sum, b) => sum + (b.netPnl || 0), 0);
             let realized = bots.reduce((sum, b) => sum + (b.realizedPnl || 0), 0);
             await this.send(`*💰 สรุปกำไร:* \`${total.toFixed(2)} USDT\` (ปิดไม้แล้ว: ${realized.toFixed(2)})`);
+            return;
+        }
+
+        if (text === '/fleet_status') {
+            if (this.portfolioManagers.length === 0) {
+                await this.send('📭 *ไม่มี Fleet ที่กำลังทำงานอยู่*');
+                return;
+            }
+
+            let msg = `*🗂 Fleet Status Report*\n`;
+            msg += `🕐 ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}\n`;
+            msg += `━━━━━━━━━━━━━━━━━━━━━━\n\n`;
+
+            for (const pm of this.portfolioManagers) {
+                // Bots belonging to this fleet (keyed by config.managedBy)
+                const fleetBots = bots.filter(b => b.config?.managedBy === pm.managerId);
+                const activeBots = fleetBots.filter(b => b.isRunning);
+                const netPnl = fleetBots.reduce((s, b) => s + (b.netPnl || 0), 0);
+                const realizedPnl = fleetBots.reduce((s, b) => s + (b.realizedPnl || 0), 0);
+                const unrealizedPnl = fleetBots.reduce((s, b) => s + (b.unrealizedPnl || 0), 0);
+                const totalTrades = fleetBots.reduce((s, b) => s + (b.totalTrades || 0), 0);
+                const wins = fleetBots.reduce((s, b) => s + (b.winCount || 0), 0);
+                const losses = fleetBots.reduce((s, b) => s + (b.lossCount || 0), 0);
+                const winRate = (wins + losses) > 0 ? ((wins / (wins + losses)) * 100).toFixed(1) : 'N/A';
+
+                const modeEmoji = pm.config.isAutonomous ? '🤖' : '🖐';
+                const statusEmoji = pm.isRunning ? '🟢' : '🔴';
+                const pnlEmoji = netPnl >= 0 ? '💰' : '📉';
+
+                msg += `${statusEmoji} *${pm.name}*\n`;
+                msg += `   ${modeEmoji} Mode: \`${pm.config.isAutonomous ? 'AUTO-PILOT' : 'MANUAL'}\`\n`;
+                msg += `   ⚙️ Action: \`${pm.currentAction}\`\n`;
+                msg += `   🤖 Bots: \`${activeBots.length} active / ${fleetBots.length} total\`\n`;
+                msg += `   ${pnlEmoji} Net PnL: \`${netPnl.toFixed(2)} USDT\`\n`;
+                msg += `   📊 Realized: \`${realizedPnl.toFixed(2)}\` | Unrealized: \`${unrealizedPnl.toFixed(2)}\`\n`;
+                msg += `   🎯 Trades: \`${totalTrades}\` | Win Rate: \`${winRate}%\`\n`;
+                msg += `   💼 Budget: \`${pm.config.totalBudget || 0} USDT\`\n`;
+
+                // Show individual bots summary
+                if (fleetBots.length > 0) {
+                    msg += `   ─────────────────────\n`;
+                    fleetBots.forEach(b => {
+                        const bPnl = (b.netPnl || 0).toFixed(2);
+                        const bEmoji = b.isRunning ? '🟢' : '⚪';
+                        const posEmoji = b.openPositions?.length > 0 ? '📌' : '  ';
+                        msg += `   ${bEmoji}${posEmoji} \`${b.config.symbol}\` [\`${b.config.strategy}\`] → \`${bPnl} USDT\`\n`;
+                    });
+                }
+                msg += `\n`;
+            }
+
+            // Grand total across all fleets
+            const grandTotal = bots.reduce((s, b) => s + (b.netPnl || 0), 0);
+            const grandEmoji = grandTotal >= 0 ? '🟢' : '🔴';
+
+            // Show unmanaged bots (created manually, no fleet)
+            const unmanagedBots = bots.filter(b => !b.config?.managedBy);
+            if (unmanagedBots.length > 0) {
+                const uPnl = unmanagedBots.reduce((s, b) => s + (b.netPnl || 0), 0);
+                msg += `🖐 *Manual Bots* (${unmanagedBots.length} ตัว)\n`;
+                unmanagedBots.forEach(b => {
+                    const bPnl = (b.netPnl || 0).toFixed(2);
+                    const bEmoji = b.isRunning ? '🟢' : '⚪';
+                    const posEmoji = b.openPositions?.length > 0 ? '📌' : '  ';
+                    msg += `   ${bEmoji}${posEmoji} \`${b.config.symbol}\` [\`${b.config.strategy}\`] → \`${bPnl} USDT\`\n`;
+                });
+                msg += `   💰 PnL: \`${uPnl.toFixed(2)} USDT\`\n\n`;
+            }
+
+            msg += `━━━━━━━━━━━━━━━━━━━━━━\n`;
+            msg += `${grandEmoji} *Grand Total PnL:* \`${grandTotal.toFixed(2)} USDT\``;
+
+            await this.send(msg);
             return;
         }
 

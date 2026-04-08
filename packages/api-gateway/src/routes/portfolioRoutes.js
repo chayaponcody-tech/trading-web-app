@@ -143,6 +143,20 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
     res.json({ success: true, message: 'Fleet deleted' });
   });
 
+  /** ⚡ Force immediate fleet review (skip interval) */
+  r.post('/fleets/:id/review', async (req, res) => {
+    const { id } = req.params;
+    const pm = portfolioManagers.get(id);
+    if (!pm) return res.status(404).json({ error: 'Fleet manager not running. Toggle fleet on first.' });
+    if (pm.isScanning) return res.status(409).json({ error: 'Review already in progress.' });
+    try {
+      await pm.forceReview();
+      res.json({ success: true, message: 'Fleet review triggered.', currentAction: pm.currentAction, logs: pm.logs.slice(0, 10) });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // --- Legacy Compatibility (Targets default fleet) ---
   const getDefaultPM = () => Array.from(portfolioManagers.values())[0];
 

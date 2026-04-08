@@ -5,7 +5,7 @@ import { BotService } from './services/botService.js';
 import { createBinanceRoutes } from './routes/binanceRoutes.js';
 import aiRoutes from './routes/aiRoutes.js';
 import { createBotRoutes } from './routes/botRoutes.js';
-import { NotificationService } from './services/notificationService.js';
+import { NotificationService } from '../packages/bot-engine/src/NotificationService.js';
 import * as dbService from './db/dbService.js';
 import { initDb } from './db/sqlite.js';
 

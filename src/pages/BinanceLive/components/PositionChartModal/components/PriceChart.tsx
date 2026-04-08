@@ -8,16 +8,16 @@ interface Props {
   indicators: any;
   entryPrice: number;
   entryTime: number;
+  hasPosition: boolean;
   type: string;
   strategy: string;
   gridUpper?: number;
   gridLower?: number;
-  height: number;
   onChartCreated?: (chart: IChartApi) => void;
 }
 
 export const PriceChart: React.FC<Props> = ({ 
-  data, indicators, entryPrice, entryTime, type, strategy, gridUpper, gridLower, height, onChartCreated 
+  data, indicators, entryPrice, entryTime, hasPosition, type, strategy, gridUpper, gridLower, onChartCreated 
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -38,7 +38,7 @@ export const PriceChart: React.FC<Props> = ({
         },
       },
       width: containerRef.current.clientWidth,
-      height: height,
+      height: containerRef.current.clientHeight,
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -51,9 +51,11 @@ export const PriceChart: React.FC<Props> = ({
     const bbUpper = chart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.4)', lineWidth: 1, title: 'BB Upper' });
     const bbLower = chart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.4)', lineWidth: 1, title: 'BB Lower' });
 
-    candleSeries.createPriceLine({
-      price: entryPrice, color: '#faad14', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'ENTRY',
-    });
+    if (hasPosition && entryPrice > 0) {
+      candleSeries.createPriceLine({
+        price: entryPrice, color: '#faad14', lineWidth: 2, lineStyle: 0, axisLabelVisible: true, title: 'ENTRY',
+      });
+    }
 
     if (strategy.includes('GRID') && gridUpper && gridLower) {
       candleSeries.createPriceLine({ price: gridUpper, color: '#f6465d', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'GRID TOP' });
@@ -67,18 +69,21 @@ export const PriceChart: React.FC<Props> = ({
       bbUpper.setData(indicators.bb.map((v: any) => ({ time: v.time, value: v.upper })));
       bbLower.setData(indicators.bb.map((v: any) => ({ time: v.time, value: v.lower })));
 
-      const closestCandle = [...data].reverse().find(c => c.time <= entryTime);
-      if (closestCandle) {
-        createSeriesMarkers(candleSeries, [
-          {
-            time: closestCandle.time as any,
-            position: type === 'LONG' ? 'belowBar' : 'aboveBar',
-            color: '#faad14',
-            shape: type === 'LONG' ? 'arrowUp' : 'arrowDown',
-            text: type === 'LONG' ? 'BUY' : 'SELL',
-            size: 2
-          }
-        ]);
+      // Only place entry marker when there's a real open position
+      if (hasPosition && entryTime > 0) {
+        const closestCandle = [...data].reverse().find(c => c.time <= entryTime);
+        if (closestCandle) {
+          createSeriesMarkers(candleSeries, [
+            {
+              time: closestCandle.time as any,
+              position: type === 'LONG' ? 'belowBar' : 'aboveBar',
+              color: '#faad14',
+              shape: type === 'LONG' ? 'arrowUp' : 'arrowDown',
+              text: type === 'LONG' ? 'BUY' : 'SELL',
+              size: 2
+            }
+          ]);
+        }
       }
 
       chart.timeScale().setVisibleRange({
@@ -91,7 +96,12 @@ export const PriceChart: React.FC<Props> = ({
     if (onChartCreated) onChartCreated(chart);
 
     const handleResize = () => {
-      if (containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+      if (containerRef.current) {
+        chart.applyOptions({ 
+          width: containerRef.current.clientWidth,
+          height: containerRef.current.clientHeight,
+        });
+      }
     };
     window.addEventListener('resize', handleResize);
 
@@ -99,7 +109,7 @@ export const PriceChart: React.FC<Props> = ({
       window.removeEventListener('resize', handleResize);
       chart.remove();
     };
-  }, [data, indicators, entryPrice, strategy, height, entryTime, type]);
+  }, [data, indicators, entryPrice, entryTime, hasPosition, strategy, type]);
 
   return <div ref={containerRef} style={{ width: '100%', height: '100%', borderRadius: '8px', overflow: 'hidden' }} />;
 };

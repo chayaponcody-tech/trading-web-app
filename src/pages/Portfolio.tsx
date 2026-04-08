@@ -305,6 +305,7 @@ export default function Portfolio() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showSettingsFor, setShowSettingsFor] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<'bots' | 'logs' | 'memory'>('bots');
+  const [reviewingFleet, setReviewingFleet] = useState<string | null>(null);
 
   const fetchData = async () => {
     try {
@@ -385,6 +386,20 @@ export default function Portfolio() {
       body: JSON.stringify({ active }),
     });
     fetchData();
+  };
+
+  const handleForceReview = async (fleetId: string) => {
+    setReviewingFleet(fleetId);
+    try {
+      const res = await fetch(`${API}/api/portfolio/fleets/${fleetId}/review`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Review failed');
+      await fetchData();
+    } catch (e: any) {
+      alert('Force Review Error: ' + e.message);
+    } finally {
+      setReviewingFleet(null);
+    }
   };
 
   const handleDeleteFleet = async (id: string, name: string) => {
@@ -532,6 +547,17 @@ export default function Portfolio() {
                       <button onClick={() => setShowSettingsFor(currentFleet)} className="btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}>
                         <Settings size={14} /> Settings
                       </button>
+                      {isAuto && (
+                        <button
+                          onClick={() => handleForceReview(currentFleet.id)}
+                          disabled={reviewingFleet === currentFleet.id}
+                          className="btn-outline"
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.8rem', borderColor: 'rgba(250,173,20,0.4)', color: '#faad14', opacity: reviewingFleet === currentFleet.id ? 0.5 : 1 }}
+                        >
+                          <RefreshCw size={14} style={{ animation: reviewingFleet === currentFleet.id ? 'spin 1s linear infinite' : 'none' }} />
+                          {reviewingFleet === currentFleet.id ? 'Reviewing...' : 'Force Review'}
+                        </button>
+                      )}
                       <button
                         onClick={() => handleToggle(currentFleet.id, !isAuto)}
                         className={isAuto ? 'btn-danger' : 'btn-primary'}

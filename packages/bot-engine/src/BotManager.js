@@ -367,7 +367,19 @@ export class BotManager {
         if ((signal === 'LONG' || signal === 'SHORT') && bot.openPositions.length === 0) {
           const lastExit = bot.lastExitTime ? new Date(bot.lastExitTime).getTime() : 0;
           if (Date.now() - lastExit >= cooldownMinutes * 60_000) {
-            await this._openPosition(bot, signal, currPrice, closes);
+            // ── Microstructure Filter (OI + Funding) ──────────────────────
+            const microOk = await this._checkMicrostructure(bot, symbol, signal);
+            if (!microOk.pass) {
+              bot.currentThought = `⚠️ [Microstructure Block] ${microOk.reason}`;
+              bot.lastThoughtAt = new Date().toISOString();
+              console.log(`[Bot ${botId}] Entry blocked by microstructure: ${microOk.reason}`);
+            } else {
+              if (microOk.note) {
+                bot.currentThought = `✅ [Microstructure OK] ${microOk.note}`;
+                bot.lastThoughtAt = new Date().toISOString();
+              }
+              await this._openPosition(bot, signal, currPrice, closes);
+            }
           } else {
             console.log(`[Bot ${botId}] Entry skipped: Cooldown active`);
           }
@@ -705,6 +717,67 @@ export class BotManager {
 
   _save() {
     saveBotMap(this.bots);
+  }
+
+  /**
+   * Fetch OI + Funding Rate right before opening a position.
+   * Returns { pass: bool, reason: string, note: string }
+   *
+   * Rules:
+   *  - Funding > +0.05%  → block LONG  (over-leveraged longs, reversal risk)
+   *  - Funding < -0.05%  → block SHORT (short squeeze risk)
+   *  - OI dropped > 10% vs previous period → signal is weak, block entry
+   */
+  async _checkMicrostructure(bot, symbol, signal) {
+    try {
+      const [fundingData, oiHistory] = await Promise.all([
+        this.exchange.getFundingRate(symbol).catch(() => null),
+        this.exchange.getOpenInterestStatistics(symbol, '15m', 3).catch(() => []),
+      ]);
+
+      const funding = fundingData?.lastFundingRate ?? 0;
+      const FUNDING_THRESHOLD = bot.config.fundingThreshold ?? 0.0005; // 0.05% default
+
+      // Funding Rate check
+      if (signal === 'LONG' && funding > FUNDING_THRESHOLD) {
+        return {
+          pass: false,
+          reason: `Funding Rate สูง (+${(funding * 100).toFixed(4)}%) — Long squeeze risk สูง ข้ามรอบนี้`,
+        };
+      }
+      if (signal === 'SHORT' && funding < -FUNDING_THRESHOLD) {
+        return {
+          pass: false,
+          reason: `Funding Rate ติดลบมาก (${(funding * 100).toFixed(4)}%) — Short squeeze risk สูง ข้ามรอบนี้`,
+        };
+      }
+
+      // OI trend check (ต้องมีอย่างน้อย 2 จุด)
+      if (Array.isArray(oiHistory) && oiHistory.length >= 2) {
+        const oiNow  = parseFloat(oiHistory.at(-1)?.sumOpenInterest ?? 0);
+        const oiPrev = parseFloat(oiHistory.at(-2)?.sumOpenInterest ?? 0);
+        if (oiPrev > 0) {
+          const oiChangePct = (oiNow - oiPrev) / oiPrev * 100;
+          if (oiChangePct < -10) {
+            return {
+              pass: false,
+              reason: `OI ลดลง ${oiChangePct.toFixed(1)}% — แรงหนุนอ่อน signal ไม่น่าเชื่อถือ`,
+            };
+          }
+          // OI confirms signal
+          const oiNote = oiChangePct > 0
+            ? `Funding ${(funding * 100).toFixed(4)}% | OI +${oiChangePct.toFixed(1)}% ยืนยันแรงซื้อ`
+            : `Funding ${(funding * 100).toFixed(4)}% | OI ${oiChangePct.toFixed(1)}%`;
+          return { pass: true, note: oiNote };
+        }
+      }
+
+      return { pass: true, note: `Funding ${(funding * 100).toFixed(4)}% — ผ่าน` };
+    } catch (e) {
+      // ถ้าดึงข้อมูลไม่ได้ ให้ผ่านไปก่อน ไม่ block entry
+      console.warn(`[Bot ${bot.id}] Microstructure check failed (non-blocking): ${e.message}`);
+      return { pass: true, note: 'Microstructure data unavailable — skipped filter' };
+    }
   }
 
   // ─── Auto Re-attach Orphan Positions ────────────────────────────────────────

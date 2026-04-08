@@ -144,11 +144,12 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
         botManager.setExchange(newAdapter);
         if (portfolioManager) portfolioManager.setExchange(newAdapter);
         
-        // Hot-swap telegram service (if implemented on BotManager)
-        if (botManager.setNotificationService) {
-           const { NotificationService } = await import('../../../bot-engine/src/NotificationService.js');
-           botManager.setNotificationService(new NotificationService(updated));
-        }
+        // Hot-swap telegram service and restart polling
+        const { NotificationService } = await import('../../../bot-engine/src/NotificationService.js');
+        const newNotif = new NotificationService(updated);
+        botManager.setNotificationService(newNotif);
+        // portfolioManager here is a single PM (legacy); polling will be restarted properly via /api/config
+        if (portfolioManager) newNotif.startPolling(botManager, [portfolioManager]);
 
         res.json({ success: true });
     } catch (e) { next(e); }
@@ -194,10 +195,44 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
     try {
       const cfg = loadBinanceConfig();
       if (!cfg.openRouterKey) return res.status(400).json({ error: 'OpenRouter key not set' });
-      const { goal = 'High Volume Scalp' } = req.body;
+      const { goal = 'High Volume Scalp', strategyType = null } = req.body;
       const svc = new BinanceAdapter(cfg.apiKey || '', cfg.apiSecret || '');
       const tickers = await svc.get24hTickers();
-      const candidates = await huntBestSymbols(tickers, goal, cfg.openRouterKey, cfg.openRouterModel);
+
+      // Pre-filter and compute regime suitability when strategyType is provided
+      let regimeData = [];
+      if (strategyType) {
+        const { MarketScanner } = await import('../../../exchange-connector/src/MarketScanner.js');
+        const scanner = new MarketScanner(svc);
+
+        // Pick scan mode based on strategy type
+        const scanMode = strategyType === 'grid' ? 'grid' : strategyType === 'scalp' ? 'scout' : 'precision';
+        const candidates = await scanner.scanTopUSDT(40, scanMode);
+
+        // Compute regime for top candidates in parallel (limit concurrency)
+        const interval = strategyType === 'grid' ? '1h' : strategyType === 'scalp' ? '5m' : '15m';
+        const BATCH = 10;
+        for (let i = 0; i < Math.min(candidates.length, 40); i += BATCH) {
+          const batch = candidates.slice(i, i + BATCH);
+          const results = await Promise.all(
+            batch.map(c => scanner.assessSuitability(c.symbol, strategyType, interval)
+              .then(r => ({ symbol: c.symbol, ...r }))
+              .catch(() => ({ symbol: c.symbol, suitable: false, score: 0 }))
+            )
+          );
+          regimeData.push(...results);
+        }
+
+        // Sort tickers to put suitable coins first
+        const suitableSet = new Set(regimeData.filter(r => r.suitable).map(r => r.symbol));
+        tickers.sort((a, b) => {
+          const aS = suitableSet.has(a.symbol) ? 1 : 0;
+          const bS = suitableSet.has(b.symbol) ? 1 : 0;
+          return bS - aS;
+        });
+      }
+
+      const candidates = await huntBestSymbols(tickers, goal, cfg.openRouterKey, cfg.openRouterModel, regimeData);
       res.json(candidates);
     } catch (e) { next(e); }
   });

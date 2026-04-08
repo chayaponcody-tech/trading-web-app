@@ -29,7 +29,7 @@ export default function BinanceLive() {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'pnl' | 'symbol' | 'started' | 'none'>('pnl');
   const [groupBy, setGroupBy] = useState<'symbol' | 'strategy' | 'model' | 'aiType' | 'fleet' | 'none'>('fleet');
-  const [viewMode, setViewMode] = useState<'grid' | 'mini' | 'compact' | 'table'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'mini' | 'compact' | 'table'>('table');
   const [expandedBots, setExpandedBots] = useState<string[]>([]);
 
   // Modal States
@@ -280,8 +280,8 @@ export default function BinanceLive() {
       return (
         <div className="glass-panel" style={{ overflow: 'hidden', padding: 0 }}>
           {/* Table header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '18px 160px 90px 90px 90px 70px 70px 1fr auto', gap: '0.5rem', padding: '0.4rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.3)' }}>
-            {['', 'Pair', 'Price', 'Net PnL', 'Realized', 'Win%', 'Funding', 'Signal', ''].map((h, i) => (
+          <div style={{ display: 'grid', gridTemplateColumns: '18px 160px 90px 90px 90px 70px 70px auto', gap: '0.5rem', padding: '0.4rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.3)' }}>
+            {['', 'Pair', 'Price', 'Net PnL', 'Realized', 'Win%', 'Funding', ''].map((h, i) => (
               <div key={i} style={{ fontSize: '0.58rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: i >= 2 && i <= 6 ? 'right' : 'left' }}>{h}</div>
             ))}
           </div>

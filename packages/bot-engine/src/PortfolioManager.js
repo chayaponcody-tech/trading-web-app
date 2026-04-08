@@ -122,7 +122,16 @@ export class PortfolioManager {
   async tick() {
     if (!this.isRunning || this.isScanning) return;
     this.isScanning = true;
-    
+    await this._doReview();
+  }
+
+  async forceReview() {
+    if (this.isScanning) throw new Error('Review already in progress.');
+    this.isScanning = true;
+    await this._doReview();
+  }
+
+  async _doReview() {
     try {
       const bots = Array.from(this.botManager.bots.values());
       // count ONLY bots managed by this instance for fleet scaling
@@ -175,7 +184,7 @@ export class PortfolioManager {
     } finally {
       this.isScanning = false;
     }
-  }
+  }  // end _doReview
 
   async _recruitNewBots(count) {
     const binanceCfg = loadBinanceConfig();

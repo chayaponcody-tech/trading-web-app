@@ -21,6 +21,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
   const [isUpdating, setIsUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'trades' | 'positions' | 'ai' | 'reflect'>('trades');
   const [marketDepth, setMarketDepth] = useState<{ openInterest: number; fundingRate: number; nextFundingTime: number } | null>(null);
+  const [showSignal, setShowSignal] = useState(true);
 
   useEffect(() => {
     if (bot.config.symbol) {
@@ -122,7 +123,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
           <span style={{ color: bot.isRunning ? '#0ecb81' : '#555', fontSize: '0.5rem', animation: bot.isRunning ? 'pulse 2s infinite' : 'none' }}>●</span>
           <span style={{ fontWeight: 'bold', fontSize: '0.9rem', color: '#fff' }}>{bot.config.symbol}</span>
           {onViewChart && (
-            <button onClick={() => onViewChart(bot.config.symbol, bot.config.interval, bot.openPositions?.[0]?.entryPrice || bot.currentPrice, bot.openPositions?.[0]?.entryTime || bot.startedAt || Date.now(), bot.openPositions?.[0]?.type || 'LONG', bot.openPositions?.[0]?.entryReason || bot.aiReason || 'Manual', bot.config.strategy, bot.config.gridUpper, bot.config.gridLower)}
+            <button onClick={() => onViewChart(bot.config.symbol, bot.config.interval, bot.openPositions?.[0]?.entryPrice || bot.currentPrice, bot.openPositions?.[0]?.entryTime || 0, bot.openPositions?.[0]?.type || 'LONG', bot.openPositions?.[0]?.entryReason || bot.aiReason || 'Manual', bot.config.strategy, bot.config.gridUpper, bot.config.gridLower)}
               style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '0.7rem' }}>📈</button>
           )}
         </div>
@@ -232,7 +233,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
   if (viewMode === 'table') {
     return (
       <>
-        <div style={{ display: 'grid', gridTemplateColumns: '18px 160px 90px 90px 90px 70px 70px 1fr auto', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.04)', background: expanded ? 'rgba(250,173,20,0.04)' : 'transparent', transition: 'background 0.15s' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '18px 160px 90px 90px 90px 70px 70px auto', alignItems: 'center', gap: '0.5rem', padding: '0.6rem 1rem', borderBottom: showSignal || expanded ? 'none' : '1px solid rgba(255,255,255,0.04)', background: expanded ? 'rgba(250,173,20,0.04)' : 'transparent', transition: 'background 0.15s' }}>
           {/* Status dot */}
           <span style={{ color: bot.isRunning ? '#0ecb81' : '#444', fontSize: '0.5rem', textAlign: 'center' }}>●</span>
 
@@ -273,21 +274,43 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
             <div style={{ fontSize: '0.55rem', color: '#555' }}>funding</div>
           </div>
 
-          {/* Signal */}
-          <div style={{ overflow: 'hidden' }}>
-            <div style={{ fontSize: '0.68rem', color: bot.isRunning ? '#faad14' : '#444', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' }}>
-              {bot.isRunning ? (bot.currentThought || 'Scanning...') : 'Idle'}
-            </div>
-          </div>
-
           {/* Actions + expand */}
           <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+            {onViewChart && (
+              <button
+                onClick={() => onViewChart(bot.config.symbol, bot.config.interval, bot.openPositions?.[0]?.entryPrice || bot.currentPrice, bot.openPositions?.[0]?.entryTime || 0, bot.openPositions?.[0]?.type || 'LONG', bot.openPositions?.[0]?.entryReason || bot.aiReason || 'Manual', bot.config.strategy, bot.config.gridUpper, bot.config.gridLower)}
+                title="View Chart"
+                style={{ background: 'rgba(250,173,20,0.1)', border: '1px solid rgba(250,173,20,0.3)', color: '#faad14', padding: '0.3rem 0.5rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 'bold' }}>
+                📈
+              </button>
+            )}
+            <button
+              onClick={() => setShowSignal(s => !s)}
+              title="Toggle Signal"
+              style={{ background: showSignal ? 'rgba(250,173,20,0.15)' : 'transparent', border: `1px solid ${showSignal ? '#faad14' : 'rgba(255,255,255,0.1)'}`, color: showSignal ? '#faad14' : '#555', padding: '0.3rem 0.5rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem' }}>
+              🧠
+            </button>
             <ActionButtons compact />
             <button onClick={onToggle} style={{ background: 'transparent', border: 'none', color: '#555', cursor: 'pointer', fontSize: '0.75rem', padding: '0.2rem 0.3rem' }}>
               {expanded ? '▲' : '▼'}
             </button>
           </div>
         </div>
+
+        {/* Signal bar — collapsible */}
+        {showSignal && (
+          <div style={{ padding: '0.4rem 1rem 0.5rem', background: 'rgba(250,173,20,0.03)', borderBottom: expanded ? 'none' : '1px solid rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+            <span style={{ fontSize: '0.9rem', opacity: bot.isRunning ? 1 : 0.3, flexShrink: 0 }}>🧠</span>
+            <span style={{ fontSize: '0.72rem', color: bot.isRunning ? '#faad14' : '#555', fontStyle: 'italic', lineHeight: '1.4' }}>
+              {bot.isRunning ? (bot.currentThought || 'Scanning...') : 'Idle'}
+            </span>
+            {bot.lastThoughtAt && (
+              <span style={{ fontSize: '0.6rem', color: '#444', flexShrink: 0, marginLeft: 'auto' }}>
+                {new Date(bot.lastThoughtAt).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' })}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Expanded inline detail */}
         {expanded && (
@@ -341,7 +364,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
             <span style={{ color: bot.isRunning ? '#0ecb81' : '#888', fontSize: '0.6rem' }}>●</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 'bold' }}>{bot.config.symbol}</div>
             {onViewChart && (
-              <button onClick={() => onViewChart(bot.config.symbol, bot.config.interval, bot.openPositions?.[0]?.entryPrice || bot.currentPrice, bot.openPositions?.[0]?.entryTime || bot.startedAt || Date.now(), bot.openPositions?.[0]?.type || 'LONG', bot.openPositions?.[0]?.entryReason || bot.aiReason || 'Manual', bot.config.strategy, bot.config.gridUpper, bot.config.gridLower)}
+              <button onClick={() => onViewChart(bot.config.symbol, bot.config.interval, bot.openPositions?.[0]?.entryPrice || bot.currentPrice, bot.openPositions?.[0]?.entryTime || 0, bot.openPositions?.[0]?.type || 'LONG', bot.openPositions?.[0]?.entryReason || bot.aiReason || 'Manual', bot.config.strategy, bot.config.gridUpper, bot.config.gridLower)}
                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1rem' }} title="View Chart">📈</button>
             )}
           </div>
@@ -614,3 +637,4 @@ function AiLogList({ logs, isReflection = false }: { logs: any[], isReflection?:
     </div>
   );
 }
+

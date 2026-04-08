@@ -21,7 +21,7 @@ export default function ConfigPage() {
 
   const fetchBinanceConfig = async () => {
     try {
-      const res = await fetch(`${API}/api/binance/config`);
+      const res = await fetch(`${API}/api/config`);
       const data = await res.json();
       setBinanceKeys(prev => ({ 
           ...prev, 
@@ -45,7 +45,7 @@ export default function ConfigPage() {
   const handleSave = async () => {
     setLoading(true);
     try {
-        const res = await fetch(`${API}/api/binance/config`, {
+        const res = await fetch(`${API}/api/config`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
