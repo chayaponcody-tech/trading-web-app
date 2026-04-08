@@ -16,6 +16,10 @@ export class PortfolioManager {
       maxDailyLossPct: 5,
       targetBotCount: 3,
       riskMode: 'confident',
+      aiModel: null,
+      aiRethinkInterval: 60,       // minutes — how often AI re-evaluates strategy per bot
+      consecutiveSLLimit: 3,       // fire bot after N consecutive SL hits
+      reviewIntervalHours: 1,      // how often fleet checks bot performance
       lastScanTime: 0,
       ...(options.config || {})
     };
@@ -70,7 +74,8 @@ export class PortfolioManager {
     if (this.isRunning) return;
     this.isRunning = true;
     this.log('Started Autonomous Monitoring...');
-    this.timer = setInterval(() => this.tick(), 5 * 60_000); // Check every 5 mins
+    const intervalMs = (this.config.reviewIntervalHours || 1) * 60 * 60_000;
+    this.timer = setInterval(() => this.tick(), intervalMs);
     this.tick(); // Immediate first tick
   }
 
@@ -82,8 +87,8 @@ export class PortfolioManager {
 
   async updateConfig(newConfig) {
     const wasAutonomous = this.config.isAutonomous;
+    const oldReviewInterval = this.config.reviewIntervalHours;
     
-    // Support updating Name if provided
     if (newConfig.name) {
       this.name = newConfig.name;
       delete newConfig.name;
@@ -91,7 +96,14 @@ export class PortfolioManager {
 
     this.config = { ...this.config, ...newConfig };
     
-    // Persist to fleets table
+    // Restart timer if review interval changed
+    if (this.isRunning && newConfig.reviewIntervalHours && newConfig.reviewIntervalHours !== oldReviewInterval) {
+      if (this.timer) clearInterval(this.timer);
+      const intervalMs = this.config.reviewIntervalHours * 60 * 60_000;
+      this.timer = setInterval(() => this.tick(), intervalMs);
+      this.log(`Review interval updated to every ${this.config.reviewIntervalHours}h`);
+    }
+    
     upsertFleet({
       id: this.managerId,
       name: this.name,
@@ -99,7 +111,6 @@ export class PortfolioManager {
       isRunning: this.isRunning
     });
     
-    // If just enabled, trigger tick immediately
     if (!wasAutonomous && this.config.isAutonomous && this.isRunning) {
       console.log('[PortfolioManager] Auto-Pilot enabled: Triggering immediate scan...');
       this.tick(); 
@@ -136,12 +147,12 @@ export class PortfolioManager {
         return;
       }
 
-      // 2. Performance Review & Substitution
+      // 2. Performance Review & Substitution (consecutive SL hits)
       this.currentAction = '📊 Reviewing Performance...';
+      const slLimit = this.config.consecutiveSLLimit || 3;
       for (const bot of activeFleet) {
-        const winRate = bot.totalTrades > 5 ? (bot.winCount / bot.totalTrades) : 1;
-        if (bot.totalTrades > 5 && winRate < 0.3 && bot.netPnl < 0) {
-          this.log(`Bot ${bot.id} (${bot.config.symbol}) performing poorly. Firing.`, 'warn');
+        if ((bot.consecutiveLosses || 0) >= slLimit) {
+          this.log(`Bot ${bot.id} (${bot.config.symbol}) hit ${bot.consecutiveLosses} consecutive SL. Replacing.`, 'warn');
           this.botManager.deleteBot(bot.id);
         }
       }
@@ -264,7 +275,7 @@ export class PortfolioManager {
           maxLossUSDT: allocatedBudget * 0.05, 
           tpPercent: recommendedStrategy.tp || 1.5,
           slPercent: recommendedStrategy.sl || 1.0,
-          // Use detailed entry reason if provided, fallback to summary
+          aiCheckInterval: this.config.aiRethinkInterval || 60,
           aiReason: `[Quant Fleet] ${recommendedStrategy.entry_reason || recommendedStrategy.reason || 'Microstructure analysis'}`,
           aiModel: this.config.aiModel || binanceCfg.openRouterModel,
           aiType: this.config.riskMode,

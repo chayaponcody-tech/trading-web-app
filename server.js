@@ -595,66 +595,62 @@ async function binanceTick(botId) {
     
     const remotePositions = accountInfo.positions.filter(p => p.symbol === symbol.toUpperCase() && parseFloat(p.positionAmt) !== 0);
     
-    // AUTO-DETECT CLOSED POSITIONS
+    // [ENHANCED] AUTO-DETECT CLOSED POSITIONS
     if (bot.openPositions.length > 0 && remotePositions.length === 0) {
-      console.log(`[Binance Bot ${botId}] Position vanished from Binance. Recording trade...`);
+      console.log(`[Binance Bot ${botId}] Position closed externally or by TP/SL. Recording...`);
       const lastPos = bot.openPositions[0];
-      const finalPrice = currPrice;
-      const finalPnL = (lastPos.type === 'LONG' ? (finalPrice - lastPos.entryPrice) : (lastPos.entryPrice - finalPrice)) * lastPos.quantity; 
-
       const tradeData = {
-        type: lastPos.type,
-        symbol: symbol,
-        entryPrice: lastPos.entryPrice,
-        exitPrice: finalPrice,
-        pnl: finalPnL,
-        reason: 'Closed (External/TP/SL)',
+        type: lastPos.type, symbol: symbol, entryPrice: lastPos.entryPrice, exitPrice: currPrice,
+        pnl: bot.unrealizedPnl || 0, reason: 'Closed (External/TP/SL)', 
         entryReason: lastPos.entryReason || 'Technical Entry',
-        exitTime: new Date().toISOString(),
-        strategy: strategy
+        exitTime: new Date().toISOString(), strategy: strategy
       };
       bot.trades.push(tradeData);
       saveTradeMemory(tradeData);
     }
 
-    // AUTO-STOP ON EXPIRATION
-    if (bot.expiresAt && new Date() > new Date(bot.expiresAt)) {
-      console.log(`[Binance Bot ${botId}] Lifespan expired. Stopping...`);
-      stopBot(botId);
-      return;
-    }
+    // [ENHANCED] AUTO-RE-ATTACH / POSITION SYNC
+    bot.openPositions = remotePositions.map(p => {
+      const posAmt = parseFloat(p.positionAmt);
+      const side = posAmt > 0 ? 'LONG' : 'SHORT';
+      
+      // Try to find if we already knew about this position
+      const existing = bot.openPositions.find(op => op.symbol === symbol && op.type === side);
+      
+      return {
+        id: p.symbol + p.updateTime,
+        type: side,
+        entryPrice: parseFloat(p.entryPrice),
+        entryTime: new Date(p.updateTime).toLocaleString('th-TH', TZ_OPTS),
+        // If it's a new match we didn't know about, it's an "ADOPTED" position
+        entryReason: existing?.entryReason || bot.lastEntryReason || `Adopted Management (${strategy})`,
+        quantity: Math.abs(posAmt),
+        unrealizedPnl: parseFloat(p.unrealizedProfit),
+        liqId: parseFloat(p.liquidationPrice),
+        highestPrice: existing?.highestPrice ? Math.max(existing.highestPrice, currPrice) : currPrice,
+        lowestPrice: existing?.lowestPrice ? Math.min(existing.lowestPrice, currPrice) : currPrice
+      };
+    });
 
-    // PERIODIC AI STRATEGIC REVIEW (Timer based - Optimized for costs & quality)
-    const aiInterval = bot.config.aiCheckInterval || 30; // Default to 30 mins for the user's recommendation
-
-    if (aiInterval > 0 && binanceConfig.openRouterKey) {
-        const lastCheck = bot.lastAiCheck ? new Date(bot.lastAiCheck).getTime() : 0;
-        const now = Date.now();
-        if (now - lastCheck >= aiInterval * 60000) {
-            performAiBotReview(botId);
-        }
-    }
-
-    bot.openPositions = remotePositions.map(p => ({
-      id: p.symbol + p.updateTime,
-      type: parseFloat(p.positionAmt) > 0 ? 'LONG' : 'SHORT',
-      entryPrice: parseFloat(p.entryPrice),
-      entryTime: new Date(p.updateTime).toLocaleString('th-TH', TZ_OPTS),
-      entryReason: bot.openPositions.find(op => op.id === (p.symbol + p.updateTime))?.entryReason || bot.lastEntryReason || 'Manual/Technical Entry',
-      quantity: Math.abs(parseFloat(p.positionAmt)),
-      unrealizedPnl: parseFloat(p.unrealizedProfit),
-      liqId: parseFloat(p.liquidationPrice)
-    }));
-
-    // 2.5 REAL-TIME TP/SL CHECK (Executes on every tick, not just candle close)
+    // 2.5 REAL-TIME TP/SL & TRAILING CHECK
     let positionsToKeep = [];
     for (const pos of bot.openPositions) {
       const pnlPct = (pos.type === 'LONG' ? (currPrice - pos.entryPrice) / pos.entryPrice : (pos.entryPrice - currPrice) / pos.entryPrice) * 100;
       let shouldClose = false;
       let reason = '';
 
+      // --- DYNAMIC SL / TRAILING LOGIC ---
+      let effectiveSL = slPercent;
+      
+      // Break-even logic: If price moves 1% in profit, move SL to -0.2% (cover fees)
+      if (pnlPct >= 1.0 && slPercent > 0.2) {
+         effectiveSL = 0.2; // Virtual SL at 0.2% loss from entry (basically break-even)
+         if (pnlPct <= -effectiveSL) { shouldClose = true; reason = 'Trailing Stop (Break-even Move)'; }
+      }
+
+      // Standard TP/SL
       if (tpPercent > 0 && pnlPct >= tpPercent) { shouldClose = true; reason = `TP Hit (+${tpPercent}%)`; }
-      else if (slPercent > 0 && pnlPct <= -slPercent) { shouldClose = true; reason = `SL Hit (-${slPercent}%)`; }
+      else if (slPercent > 0 && pnlPct <= -effectiveSL) { shouldClose = true; reason = `SL Hit (-${effectiveSL}%)`; }
 
       if (shouldClose) {
         console.log(`[Binance Bot ${botId}] REAL-TIME Closing ${pos.type} pos: ${reason}`);
@@ -662,8 +658,7 @@ async function binanceTick(botId) {
         const tradeData = {
           type: pos.type, symbol: symbol, entryPrice: pos.entryPrice, exitPrice: currPrice,
           pnl: pos.unrealizedPnl, reason, exitTime: new Date().toISOString(),
-          entryReason: pos.entryReason || 'Technical Entry',
-          strategy: strategy
+          entryReason: pos.entryReason, strategy: strategy
         };
         bot.trades.push(tradeData);
         saveTradeMemory(tradeData);
@@ -672,6 +667,7 @@ async function binanceTick(botId) {
       }
     }
     bot.openPositions = positionsToKeep;
+
 
     // 3. Trading Logic on Candle Close (Signals & Trend Changes)
     bot.lastChecked = new Date().toLocaleString('th-TH', TZ_OPTS);

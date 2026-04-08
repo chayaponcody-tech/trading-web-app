@@ -1,6 +1,7 @@
 import { computeSignal, generateEntryReason, generateDiagnostic } from './SignalEngine.js';
 import { reflect } from '../../ai-agents/src/ReflectionAgent.js';
 import { reviewBot } from '../../ai-agents/src/ReviewerAgent.js';
+import { assessTrailingAdjustment } from '../../ai-agents/src/TrailingAIAgent.js';
 import { saveBotMap, deleteBot } from '../../data-layer/src/repositories/botRepository.js';
 import { appendTrade } from '../../data-layer/src/repositories/tradeRepository.js';
 import { saveMistake, getRecentMistakes } from '../../data-layer/src/index.js';
@@ -154,6 +155,9 @@ export class BotManager {
       if (this.notificationService) {
         this.notificationService.send(`🕯️ *System Recovery:* กู้คืนบอทสำเร็จ \`${savedBots.length}\` ตัว เข้าสู่ระบบจัดการอัตโนมัติแล้วค่ะ`);
       }
+
+      // Scan for orphan positions not managed by any bot
+      setTimeout(() => this.reattachOrphanPositions(), 5000);
     } catch (e) {
       console.error('[BotManager] Failed to resurrect bots:', e.message);
     }
@@ -222,9 +226,11 @@ export class BotManager {
     const bot = this.bots.get(botId);
     if (!bot || !bot.isRunning || !this.exchange) return;
 
-    const { symbol, strategy, tpPercent, slPercent, leverage = 10,
+    const { symbol: rawSymbol, strategy, tpPercent, slPercent, leverage = 10,
             positionSizeUSDT = 100, aiCheckInterval = 30,
             trailingStopPct = 0, maxDrawdownPct = 0, cooldownMinutes = 0 } = bot.config;
+    // Normalize symbol for Binance API (SWARMS/USDT:USDT → SWARMSUSDT)
+    const symbol = rawSymbol.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
     const interval = (bot.config.interval || '1h').toLowerCase();
 
     try {
@@ -265,8 +271,9 @@ export class BotManager {
       }
 
       // ── Sync open positions and PnL ────────────────────────────────────────
+      const normalizedSymbol = symbol.toUpperCase().replace('/', '').replace(':USDT', '').replace(':USD', '');
       const remotePos = (accountInfo.positions || []).filter(
-        (p) => p.symbol === symbol.toUpperCase() && parseFloat(p.positionAmt) !== 0
+        (p) => (p.symbol === symbol.toUpperCase() || p.symbol === normalizedSymbol) && parseFloat(p.positionAmt) !== 0
       );
 
       // Handle field name variations (unrealizedProfit vs unRealizedProfit)
@@ -316,22 +323,14 @@ export class BotManager {
           ? (currPrice - pos.entryPrice) / pos.entryPrice
           : (pos.entryPrice - currPrice) / pos.entryPrice) * 100;
 
-        // Trailing Stop Logic
-        if (trailingStopPct > 0) {
-          if (pos.type === 'LONG') {
-            pos.highestPrice = Math.max(pos.highestPrice || pos.entryPrice, currPrice);
-            const tsPrice = pos.highestPrice * (1 - trailingStopPct / 100);
-            if (currPrice <= tsPrice) {
-              await this._closePosition(bot, pos, currPrice, `Trailing Stop Hit (${pnlPct.toFixed(2)}%)`);
-              continue;
-            }
-          } else {
-            pos.lowestPrice = Math.min(pos.lowestPrice || pos.entryPrice, currPrice);
-            const tsPrice = pos.lowestPrice * (1 + trailingStopPct / 100);
-            if (currPrice >= tsPrice) {
-              await this._closePosition(bot, pos, currPrice, `Trailing Stop Hit (${pnlPct.toFixed(2)}%)`);
-              continue;
-            }
+        // Trailing Stop Logic — uses pos.trailingSl set by _handleTrailingStop()
+        if (trailingStopPct > 0 && pos.trailingSl) {
+          if (pos.type === 'LONG' && currPrice <= pos.trailingSl) {
+            await this._closePosition(bot, pos, currPrice, `Trailing Stop Hit (${pnlPct.toFixed(2)}%)`);
+            continue;
+          } else if (pos.type === 'SHORT' && currPrice >= pos.trailingSl) {
+            await this._closePosition(bot, pos, currPrice, `Trailing Stop Hit (${pnlPct.toFixed(2)}%)`);
+            continue;
           }
         }
 
@@ -386,6 +385,18 @@ export class BotManager {
         bot.aiReason = 'Stopped automatically due to Invalid API Keys. Please update Demo Keys.';
         this._save();
       }
+      if (err.message.includes('-1121')) {
+        console.warn(`[Bot ${botId}] AUTO-PAUSED: Invalid symbol ${bot.config.symbol}.`);
+        bot.isRunning = false;
+        bot.aiReason = `Stopped: Invalid symbol "${bot.config.symbol}" on Binance Futures.`;
+        this._save();
+      }
+      if (err.message.includes('-4411')) {
+        console.warn(`[Bot ${botId}] AUTO-PAUSED: TradFi-Perps agreement required for ${bot.config.symbol}.`);
+        bot.isRunning = false;
+        bot.aiReason = `Stopped: Symbol ${bot.config.symbol} requires signing TradFi-Perps agreement on Binance.`;
+        this._save();
+      }
     }
   }
 
@@ -422,10 +433,11 @@ export class BotManager {
                  || { stepSize: 0.001, minQty: 0.001, precision: 3, tickSize: 0.0001, pricePrecision: 4 };
     const leverage = bot.config.leverage || 10;
     const posValue  = bot.config.positionSizeUSDT || 100;
+    const symbol = bot.config.symbol.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
 
     // Set leverage on exchange before placing any orders
     try {
-      await this.exchange.setLeverage(bot.config.symbol, leverage);
+      await this.exchange.setLeverage(symbol, leverage);
     } catch (e) {
       console.warn(`[Bot ${bot.id}] setLeverage failed:`, e.message);
     }
@@ -481,7 +493,7 @@ export class BotManager {
       
       if (s.type === 'MARKET') {
         const orderRes = await this.exchange.placeOrder(
-          bot.config.symbol,
+          symbol,
           signal === 'LONG' ? 'BUY' : 'SELL',
           'MARKET',
           qtyStr
@@ -510,7 +522,7 @@ export class BotManager {
 
         try {
           await this.exchange.placeOrder(
-            bot.config.symbol,
+            symbol,
             signal === 'LONG' ? 'BUY' : 'SELL',
             'LIMIT',
             qtyStr,
@@ -532,7 +544,8 @@ export class BotManager {
 
   async _closePosition(bot, pos, currPrice, reason) {
     try {
-      await this.exchange.closePosition(bot.config.symbol, pos.type, pos.quantity);
+      const symbol = bot.config.symbol.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
+      await this.exchange.closePosition(symbol, pos.type, pos.quantity);
       bot.openPositions = bot.openPositions.filter((p) => p.id !== pos.id);
 
       const pnl = (pos.type === 'LONG'
@@ -615,6 +628,49 @@ export class BotManager {
     if (!bot) return;
 
     const preferredModel = bot.config.aiModel || this.config.openRouterModel;
+
+    // ── AI TP/SL Adjustment (when position is open) ──────────────────────────
+    if (bot.openPositions.length > 0 && this.config.openRouterKey) {
+      for (const pos of bot.openPositions) {
+        const currPrice = bot.currentPrice;
+        const adjustment = await assessTrailingAdjustment(
+          bot, pos, currPrice, closes,
+          this.config.openRouterKey,
+          preferredModel
+        ).catch((e) => {
+          console.error(`[Bot ${botId}] TrailingAI error:`, e.message);
+          return null;
+        });
+
+        if (!adjustment || adjustment.action === 'HOLD') continue;
+
+        if (adjustment.action === 'EXTEND_TP' && adjustment.newTpPercent) {
+          const oldTp = bot.config.tpPercent;
+          bot.config.tpPercent = adjustment.newTpPercent;
+          console.log(`[Bot ${botId}] 🎯 AI Extended TP: ${oldTp}% → ${adjustment.newTpPercent}% — ${adjustment.reason}`);
+          bot.aiHistory.push({
+            time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }),
+            message: `[AI TP Extended] ${oldTp}% → ${adjustment.newTpPercent}% — ${adjustment.reason}`,
+            decision: 'EXTEND_TP',
+            model: preferredModel,
+          });
+        } else if (adjustment.action === 'TIGHTEN_TRAIL' && adjustment.newTrailingPct) {
+          const oldTrail = bot.config.trailingStopPct;
+          bot.config.trailingStopPct = adjustment.newTrailingPct;
+          // Reset trailingSl so it recalculates with new tighter distance
+          pos.trailingSl = null;
+          console.log(`[Bot ${botId}] 🔒 AI Tightened Trail: ${oldTrail}% → ${adjustment.newTrailingPct}% — ${adjustment.reason}`);
+          bot.aiHistory.push({
+            time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }),
+            message: `[AI Trail Tightened] ${oldTrail}% → ${adjustment.newTrailingPct}% — ${adjustment.reason}`,
+            decision: 'TIGHTEN_TRAIL',
+            model: preferredModel,
+          });
+        }
+      }
+    }
+
+    // ── Standard Bot Review ──────────────────────────────────────────────────
     const result = await reviewBot(
       bot, closes,
       this.config.openRouterKey,
@@ -651,38 +707,169 @@ export class BotManager {
     saveBotMap(this.bots);
   }
 
+  // ─── Auto Re-attach Orphan Positions ────────────────────────────────────────
+  // Scans all open positions on Binance and attaches any unmanaged ones
+  // to a running bot that matches symbol + side. If no bot matches,
+  // creates a lightweight "guardian" bot to manage the position.
+
+  async reattachOrphanPositions() {
+    if (!this.exchange) return;
+
+    let accountInfo;
+    try {
+      accountInfo = await this.exchange.getAccountInfo();
+    } catch (e) {
+      console.error('[BotManager] reattachOrphanPositions: getAccountInfo failed:', e.message);
+      return;
+    }
+
+    const remotePositions = (accountInfo.positions || []).filter(
+      (p) => parseFloat(p.positionAmt) !== 0
+    );
+
+    if (remotePositions.length === 0) return;
+
+    for (const rp of remotePositions) {
+      const symbol = rp.symbol.toUpperCase();
+      const amt = parseFloat(rp.positionAmt);
+      const side = amt > 0 ? 'LONG' : 'SHORT';
+      const entryPrice = parseFloat(rp.entryPrice);
+
+      // Check if any running bot already manages this symbol + side
+      const managingBot = [...this.bots.values()].find(
+        (b) =>
+          b.isRunning &&
+          b.config.symbol.toUpperCase() === symbol &&
+          b.openPositions.some((p) => p.type === side)
+      );
+
+      if (managingBot) continue; // Already managed
+
+      // Find a running bot for this symbol (any side) to attach to
+      const candidateBot = [...this.bots.values()].find(
+        (b) => b.isRunning && b.config.symbol.toUpperCase() === symbol
+      );
+
+      const posEntry = {
+        id: `reattach_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+        type: side,
+        entryPrice,
+        highestPrice: entryPrice,
+        lowestPrice: entryPrice,
+        entryTime: new Date().toISOString(),
+        entryReason: 'Auto Re-attached (Manual/External Position)',
+        quantity: Math.abs(amt),
+        isReattached: true,
+      };
+
+      if (candidateBot) {
+        // Attach to existing bot for this symbol
+        candidateBot.openPositions.push(posEntry);
+        console.log(`[BotManager] Re-attached ${side} ${symbol} position to bot ${candidateBot.id}`);
+        if (this.notificationService) {
+          this.notificationService.send(
+            `🔗 *Auto Re-attach*\nSymbol: \`${symbol}\` | Side: \`${side}\`\nAttached to Bot: \`${candidateBot.id.slice(-6)}\`\nEntry: ${entryPrice}`
+          );
+        }
+      } else {
+        // No bot for this symbol — create a guardian bot
+        const guardianId = makeBotId();
+        const guardian = {
+          id: guardianId,
+          isRunning: true,
+          config: {
+            symbol,
+            strategy: 'EMA_CROSS',
+            tpPercent: 2,
+            slPercent: 1,
+            trailingStopPct: 1,
+            trailingActivationPct: 0.5,
+            leverage: 1,
+            positionSizeUSDT: Math.abs(amt) * entryPrice,
+            interval: '15m',
+            aiCheckInterval: 30,
+            isGuardian: true,
+          },
+          expiresAt: null,
+          openPositions: [posEntry],
+          capital: Math.abs(amt) * entryPrice,
+          currentCash: 0,
+          equity: Math.abs(amt) * entryPrice,
+          grossProfit: 0,
+          grossLoss: 0,
+          winCount: 0,
+          lossCount: 0,
+          lastSignal: side,
+          lastCandle: null,
+          lastChecked: '',
+          currentPrice: entryPrice,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          netPnl: 0,
+          trades: [],
+          consecutiveLosses: 0,
+          aiHistory: [],
+          reflectionHistory: [],
+          reflectionStatus: null,
+          startedAt: new Date().toISOString(),
+          lastAiCheck: new Date().toISOString(),
+          aiReason: `Guardian bot — re-attached ${side} position from external/manual trade`,
+          lastAiModel: null,
+        };
+
+        this.bots.set(guardianId, guardian);
+        this._scheduleBot(guardianId);
+        this._save();
+
+        console.log(`[BotManager] Created Guardian Bot ${guardianId} for orphan ${side} ${symbol}`);
+        if (this.notificationService) {
+          this.notificationService.send(
+            `🛡️ *Guardian Bot Created*\nSymbol: \`${symbol}\` | Side: \`${side}\`\nBot ID: \`${guardianId.slice(-6)}\`\nEntry: ${entryPrice}\nReason: ไม่มีบอทดูแล — สร้าง Guardian อัตโนมัติ`
+          );
+        }
+      }
+    }
+
+    this._save();
+  }
+
   // ─── Adaptive Trailing Stop Logic ──────────────────────────────────────────
+  // Uses bot.config.trailingStopPct (configurable) with a configurable
+  // activation threshold (trailingActivationPct, default 1%).
 
   _handleTrailingStop(botId, currentPrice) {
     const bot = this.bots.get(botId);
     if (!bot || !bot.openPositions || bot.openPositions.length === 0) return;
 
-    const pos = bot.openPositions[0];
-    const side = pos.type.toUpperCase();
-    const isLong = side === 'LONG' || side === 'BUY';
-    
-    // Calculate Trailing Activation
-    // If price moves 1% in profit, start trailing with 1% distance
-    const entryPrice = parseFloat(pos.entryPrice);
-    const pnlPct = isLong ? (currentPrice - entryPrice) / entryPrice : (entryPrice - currentPrice) / entryPrice;
-    
-    // Activation threshold: 1.5% profit
-    if (pnlPct > 0.015) {
-       const trailDistance = currentPrice * 0.01; // 1% trailing
-       const newSl = isLong ? currentPrice - trailDistance : currentPrice + trailDistance;
-       
-       // Only move SL in our favor (up for long, down for short)
-       if (isLong) {
-         if (!bot.config.slPrice || newSl > bot.config.slPrice) {
-           bot.config.slPrice = newSl;
-           console.log(`[Bot ${botId}] Trailing SL Moved Up: ${newSl.toFixed(2)}`);
-         }
-       } else {
-         if (!bot.config.slPrice || newSl < bot.config.slPrice) {
-           bot.config.slPrice = newSl;
-           console.log(`[Bot ${botId}] Trailing SL Moved Down: ${newSl.toFixed(2)}`);
-         }
-       }
+    const trailingPct = parseFloat(bot.config.trailingStopPct || 0);
+    const activationPct = parseFloat(bot.config.trailingActivationPct || 1.0);
+
+    if (trailingPct <= 0) return;
+
+    for (const pos of bot.openPositions) {
+      const isLong = pos.type === 'LONG';
+      const entryPrice = parseFloat(pos.entryPrice);
+      const pnlPct = isLong
+        ? ((currentPrice - entryPrice) / entryPrice) * 100
+        : ((entryPrice - currentPrice) / entryPrice) * 100;
+
+      if (pnlPct < activationPct) continue;
+
+      if (isLong) {
+        pos.highestPrice = Math.max(pos.highestPrice || entryPrice, currentPrice);
+        const newSl = pos.highestPrice * (1 - trailingPct / 100);
+        if (!pos.trailingSl || newSl > pos.trailingSl) {
+          pos.trailingSl = newSl;
+          console.log(`[Bot ${botId}] 📈 Trailing SL ↑ ${newSl.toFixed(4)} (peak: ${pos.highestPrice.toFixed(4)}, trail: ${trailingPct}%)`);
+        }
+      } else {
+        pos.lowestPrice = Math.min(pos.lowestPrice || entryPrice, currentPrice);
+        const newSl = pos.lowestPrice * (1 + trailingPct / 100);
+        if (!pos.trailingSl || newSl < pos.trailingSl) {
+          pos.trailingSl = newSl;
+          console.log(`[Bot ${botId}] 📉 Trailing SL ↓ ${newSl.toFixed(4)} (trough: ${pos.lowestPrice.toFixed(4)}, trail: ${trailingPct}%)`);
+        }
+      }
     }
   }
 

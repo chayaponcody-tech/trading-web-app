@@ -28,8 +28,8 @@ export default function BinanceLive() {
   };
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'pnl' | 'symbol' | 'started' | 'none'>('pnl');
-  const [groupBy, setGroupBy] = useState<'symbol' | 'strategy' | 'model' | 'aiType' | 'none'>('aiType');
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'mini'>('grid');
+  const [groupBy, setGroupBy] = useState<'symbol' | 'strategy' | 'model' | 'aiType' | 'fleet' | 'none'>('fleet');
+  const [viewMode, setViewMode] = useState<'grid' | 'mini' | 'compact' | 'table'>('grid');
   const [expandedBots, setExpandedBots] = useState<string[]>([]);
 
   // Modal States
@@ -42,6 +42,13 @@ export default function BinanceLive() {
   // Form Temp State (for modals)
   const [currentAiType, setCurrentAiType] = useState<'confident' | 'grid' | 'scout'>('confident');
   const [sidebarMode, setSidebarMode] = useState<'full' | 'mini' | 'none'>('full');
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
+
+  const toggleGroup = (groupName: string) => {
+    setCollapsedGroups(prev =>
+      prev.includes(groupName) ? prev.filter(g => g !== groupName) : [...prev, groupName]
+    );
+  };
   const [showThinkingModal, setShowThinkingModal] = useState(false);
   const [thinkingText, setThinkingText] = useState('');
   const [positionSizeUSDT, setPositionSizeUSDT] = useState(100);
@@ -254,25 +261,44 @@ export default function BinanceLive() {
   else if (sortBy === 'started') filteredBots.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 
   // ─── Render Grouped ───────────────────────────────────────────────────────────
-  const renderBotList = (list: Bot[]) => (
-    <div style={
-      viewMode === 'grid' ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '1rem' } : 
-      { display: 'flex', flexDirection: 'column', gap: viewMode === 'mini' ? '0.4rem' : '0.75rem' }
-    }>
-      {list.map(bot => (
-        <BotCard 
-          key={bot.id} bot={bot} 
-          onStop={handleStop} onDelete={handleDelete} onResume={handleResume} 
-          onReview={handleReviewMistakes} onOptimize={handleOptimize} 
-          expanded={expandedBots.includes(bot.id)} 
-          onToggle={() => handleToggleHistory(bot.id)} 
-          onViewChart={handleViewChart}
-          viewMode={viewMode}
-          isGrid={viewMode === 'grid'} 
-        />
-      ))}
-    </div>
-  );
+  const renderBotList = (list: Bot[]) => {
+    const cards = list.map(bot => (
+      <BotCard
+        key={bot.id} bot={bot}
+        onStop={handleStop} onDelete={handleDelete} onResume={handleResume}
+        onReview={handleReviewMistakes} onOptimize={handleOptimize}
+        expanded={expandedBots.includes(bot.id)}
+        onToggle={() => handleToggleHistory(bot.id)}
+        onViewChart={handleViewChart}
+        viewMode={viewMode}
+        isGrid={viewMode === 'grid'}
+        exchangePositions={activePositions}
+      />
+    ));
+
+    if (viewMode === 'table') {
+      return (
+        <div className="glass-panel" style={{ overflow: 'hidden', padding: 0 }}>
+          {/* Table header */}
+          <div style={{ display: 'grid', gridTemplateColumns: '18px 160px 90px 90px 90px 70px 70px 1fr auto', gap: '0.5rem', padding: '0.4rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.08)', background: 'rgba(0,0,0,0.3)' }}>
+            {['', 'Pair', 'Price', 'Net PnL', 'Realized', 'Win%', 'Funding', 'Signal', ''].map((h, i) => (
+              <div key={i} style={{ fontSize: '0.58rem', color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', textAlign: i >= 2 && i <= 6 ? 'right' : 'left' }}>{h}</div>
+            ))}
+          </div>
+          {cards}
+        </div>
+      );
+    }
+
+    return (
+      <div style={
+        viewMode === 'grid' ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '1rem' } :
+        { display: 'flex', flexDirection: 'column', gap: viewMode === 'mini' ? '0.4rem' : '0.5rem' }
+      }>
+        {cards}
+      </div>
+    );
+  };
 
   const getGroupedBots = () => {
     if (groupBy === 'none') return null;
@@ -284,6 +310,12 @@ export default function BinanceLive() {
       else if (groupBy === 'model') key = bot.lastAiModel || (bot.config as any).aiModel || 'Technical Engine';
       else if (groupBy === 'aiType') {
          key = (bot.config as any).aiType === 'confident' ? '✨ AI Confident' : (bot.config as any).aiType === 'scout' ? '🏹 AI Scout' : (bot.config as any).aiType === 'grid' ? '📏 AI Grid' : '🛠️ Manual/Strategy';
+      } else if (groupBy === 'fleet') {
+        const managedBy = (bot.config as any).managedBy;
+        const fleet = fleets.find(f => f.id === managedBy);
+        if (fleet) key = `🚀 ${fleet.name}`;
+        else if (managedBy === 'manual') key = '🛠️ Manual';
+        else key = '🛠️ Manual / Unassigned';
       }
       if (!groups[key]) groups[key] = [];
       groups[key].push(bot);
@@ -405,6 +437,7 @@ export default function BinanceLive() {
                 </select>
                 <select value={groupBy} onChange={(e: any) => setGroupBy(e.target.value)} style={{ background: '#1e222d', color: '#fff', border: '1px solid var(--border-color)', borderRadius: '4px', padding: '0.2rem', outline: 'none', fontSize: '0.75rem' }}>
                   <option value="none">Group: None</option>
+                  <option value="fleet">Group: Fleet</option>
                   <option value="symbol">Group: Symbol</option>
                   <option value="strategy">Group: Strategy</option>
                   <option value="model">Group: AI Model</option>
@@ -426,7 +459,8 @@ export default function BinanceLive() {
                   </button>
                   <div style={{ width: '1px', background: 'rgba(255,255,255,0.1)', margin: '0 2px' }} />
                   <button onClick={() => setViewMode('grid')} style={{ padding: '0.3rem 0.6rem', border: 'none', background: viewMode === 'grid' ? '#faad1422' : 'transparent', color: viewMode === 'grid' ? '#faad14' : 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>Grid</button>
-                  <button onClick={() => setViewMode('list')} style={{ padding: '0.3rem 0.6rem', border: 'none', background: viewMode === 'list' ? '#faad1422' : 'transparent', color: viewMode === 'list' ? '#faad14' : 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>List</button>
+                  <button onClick={() => setViewMode('compact')} style={{ padding: '0.3rem 0.6rem', border: 'none', background: viewMode === 'compact' ? '#faad1422' : 'transparent', color: viewMode === 'compact' ? '#faad14' : 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>Compact</button>
+                  <button onClick={() => setViewMode('table')} style={{ padding: '0.3rem 0.6rem', border: 'none', background: viewMode === 'table' ? '#faad1422' : 'transparent', color: viewMode === 'table' ? '#faad14' : 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>Table</button>
                   <button onClick={() => setViewMode('mini')} style={{ padding: '0.3rem 0.6rem', border: 'none', background: viewMode === 'mini' ? '#faad1422' : 'transparent', color: viewMode === 'mini' ? '#faad14' : 'var(--text-muted)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>Mini</button>
                 </div>
               </div>
@@ -438,15 +472,47 @@ export default function BinanceLive() {
               ) : groupBy === 'none' || !groupedBots ? (
                 renderBotList(filteredBots)
               ) : (
-                Object.entries(groupedBots).map(([groupName, list]) => (
-                  <div key={groupName} style={{ marginBottom: '2.5rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem', borderBottom: '1px solid rgba(250,173,20,0.2)', paddingBottom: '0.5rem' }}>
-                      <h3 style={{ margin: 0, color: '#faad14', fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '1px' }}>{groupName}</h3>
-                      <span style={{ fontSize: '0.7rem', color: '#888', background: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.6rem', borderRadius: '10px' }}>{list.length} bots</span>
+                Object.entries(groupedBots).map(([groupName, list]) => {
+                  const groupPnl = list.reduce((s, b) => s + (b.netPnl || 0), 0);
+                  const runningCount = list.filter(b => b.isRunning).length;
+                  const fleetObj = groupBy === 'fleet'
+                    ? fleets.find(f => groupName === `🚀 ${f.name}`)
+                    : null;
+                  const isAutoFleet = fleetObj?.config?.isAutonomous;
+
+                  return (
+                    <div key={groupName} style={{ marginBottom: '2.5rem' }}>
+                      <div 
+                        onClick={() => toggleGroup(groupName)}
+                        style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: collapsedGroups.includes(groupName) ? '0' : '1rem', borderBottom: '1px solid rgba(250,173,20,0.2)', paddingBottom: '0.5rem', cursor: 'pointer', userSelect: 'none' }}>
+                        <span style={{ color: '#faad14', fontSize: '0.8rem', width: '16px' }}>
+                          {collapsedGroups.includes(groupName) ? '▶' : '▼'}
+                        </span>
+                        <h3 style={{ margin: 0, color: '#faad14', fontSize: '1rem', textTransform: 'uppercase', letterSpacing: '1px' }}>{groupName}</h3>
+                        <span style={{ fontSize: '0.7rem', color: '#888', background: 'rgba(255,255,255,0.05)', padding: '0.1rem 0.6rem', borderRadius: '10px' }}>{list.length} bots</span>
+                        {groupBy === 'fleet' && (
+                          <>
+                            <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: groupPnl >= 0 ? '#0ecb81' : '#f6465d' }}>
+                              {groupPnl >= 0 ? '+' : ''}{groupPnl.toFixed(2)} USDT
+                            </span>
+                            <span style={{ fontSize: '0.7rem', color: '#555' }}>{runningCount} running</span>
+                            {isAutoFleet && (
+                              <span style={{ fontSize: '0.65rem', padding: '1px 7px', borderRadius: '10px', background: 'rgba(14,203,129,0.15)', color: '#0ecb81', border: '1px solid rgba(14,203,129,0.25)' }}>
+                                ● AUTO-PILOT
+                              </span>
+                            )}
+                            {fleetObj && (
+                              <span style={{ fontSize: '0.65rem', color: '#555' }}>
+                                {fleetObj.config?.riskMode} · ${fleetObj.config?.totalBudget?.toLocaleString()} budget
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      {!collapsedGroups.includes(groupName) && renderBotList(list)}
                     </div>
-                    {renderBotList(list)}
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </>

@@ -187,11 +187,31 @@ export function createBotRoutes(botManager) {
       if (!bot) return res.status(404).json({ error: 'Bot not found' });
       if (config.tpPercent !== undefined) bot.config.tpPercent = config.tpPercent;
       if (config.slPercent !== undefined) bot.config.slPercent = config.slPercent;
+      if (config.trailingStopPct !== undefined) bot.config.trailingStopPct = config.trailingStopPct;
+      if (config.trailingActivationPct !== undefined) bot.config.trailingActivationPct = config.trailingActivationPct;
       if (config.aiCheckInterval !== undefined) bot.config.aiCheckInterval = config.aiCheckInterval;
       botManager._save();
       res.json({ success: true });
     } catch (e) { next(e); }
   });
 
+  /**
+   * @swagger
+   * /api/forward-test/reattach:
+   *   post:
+   *     summary: Scan Binance for unmanaged positions and re-attach them to bots
+   *     tags: [Bots]
+   *     responses:
+   *       200:
+   *         description: Re-attach scan completed
+   */
+  r.post('/reattach', async (req, res, next) => {
+    try {
+      await botManager.reattachOrphanPositions();
+      res.json({ success: true, message: 'Re-attach scan completed' });
+    } catch (e) { next(e); }
+  });
+
   return r;
 }
+

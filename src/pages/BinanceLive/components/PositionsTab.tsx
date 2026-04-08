@@ -29,11 +29,14 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
     sorted.sort((a, b) => a.symbol.localeCompare(b.symbol));
   }
 
+  // Normalize symbol for matching (SWARMS/USDT:USDT → SWARMSUSDT)
+  const normalizeSymbol = (s: string) => s.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
+
   // --- Grouping Logic ---
   const groupedPositions: { [fleetId: string]: { fleetName: string, list: any[] } } = {};
   
   sorted.forEach(p => {
-    const linkedBot = bots.find(b => b.config.symbol === p.symbol);
+    const linkedBot = bots.find(b => normalizeSymbol(b.config.symbol) === normalizeSymbol(p.symbol));
     const fleetId = linkedBot?.config?.managedBy || 'manual';
     const fleetName = fleetId === 'manual' ? 'Manual / External' : (fleets.find(f => f.id === fleetId)?.name || 'Unknown Fleet');
     
@@ -99,7 +102,7 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
                   const marginValue = (Math.abs(amt) * entryPrice) / leverage;
                   const roe = (upnl / (marginValue || 1)) * 100;
                   
-                  const linkedBot = bots.find(b => b.config.symbol === p.symbol);
+                  const linkedBot = bots.find(b => normalizeSymbol(b.config.symbol) === normalizeSymbol(p.symbol));
                   const fleetNameTag = fleetId === 'manual' ? 'External' : (fleets.find(f => f.id === fleetId)?.name || 'Managed');
                   
                   const tpPct = linkedBot?.config?.tpPercent || 0;

@@ -111,7 +111,7 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
     
     if (!pm && active) {
         // Dynamic instantiation if not running
-        const { PortfolioManager } = await import('../../bot-engine/src/PortfolioManager.js');
+        const { PortfolioManager } = await import('../../../bot-engine/src/PortfolioManager.js');
         const fleet = getFleetById(id);
         if (!fleet) return res.status(404).json({ error: 'Fleet not found' });
         

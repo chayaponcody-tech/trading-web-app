@@ -152,7 +152,7 @@ export class BinanceAdapter extends BaseExchange {
   async closePosition(symbol, positionSide, quantity) {
     try {
       const side = (positionSide.toUpperCase() === 'LONG' || positionSide.toUpperCase() === 'BUY') ? 'SELL' : 'BUY';
-      return await this.client.createOrder(symbol.toUpperCase(), 'market', side.toLowerCase(), quantity);
+      return await this.client.createOrder(symbol.toUpperCase(), 'market', side.toLowerCase(), quantity, undefined, { reduceOnly: true });
     } catch (e) {
       throw new Error(`[BinanceAdapter] closePosition error: ${e.message}`);
     }

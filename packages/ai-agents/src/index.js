@@ -5,3 +5,4 @@ export { reflect } from './ReflectionAgent.js';
 export { reviewBot } from './ReviewerAgent.js';
 export { analyzeMistakes, analyzeFleet } from './OptimizerAgent.js';
 export { huntBestSymbols } from './HunterAgent.js';
+export { assessTrailingAdjustment } from './TrailingAIAgent.js';

@@ -7,12 +7,24 @@ export function getAllBots() {
   if (useSqlite) {
     try {
       const rows = db.prepare('SELECT * FROM bots').all();
+      const allTrades = db.prepare('SELECT * FROM trades ORDER BY exitTime ASC').all();
+      const tradesByBot = {};
+      for (const t of allTrades) {
+        if (!tradesByBot[t.botId]) tradesByBot[t.botId] = [];
+        tradesByBot[t.botId].push({
+          ...t,
+          pnl: parseFloat(t.pnl || 0),
+          entryPrice: parseFloat(t.entryPrice || 0),
+          exitPrice: parseFloat(t.exitPrice || 0),
+        });
+      }
       return rows.map(b => ({
         ...b,
         config: JSON.parse(b.config || '{}'),
         openPositions: JSON.parse(b.openPositions || '[]'),
         aiHistory: JSON.parse(b.aiHistory || '[]'),
         reflectionHistory: JSON.parse(b.reflectionHistory || '[]'),
+        trades: tradesByBot[b.id] || [],
         isRunning: b.isRunning === 1
       }));
     } catch (e) {

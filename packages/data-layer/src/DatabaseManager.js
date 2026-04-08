@@ -49,6 +49,7 @@ export function initDb() {
         entryPrice REAL, 
         exitPrice REAL, 
         pnl REAL, 
+        entryTime TEXT,
         exitTime TEXT, 
         reason TEXT,
         strategy TEXT, 
@@ -118,6 +119,13 @@ export function initDb() {
     if (!hasExpiresAt) {
       db.exec('ALTER TABLE bots ADD COLUMN expiresAt TEXT');
       console.log('✅ SQLite: Migrated bots table — added expiresAt');
+    }
+
+    // Migrate trades table — add entryTime if missing
+    const tradeColumns = db.prepare('PRAGMA table_info(trades)').all();
+    if (!tradeColumns.some(c => c.name === 'entryTime')) {
+      db.exec('ALTER TABLE trades ADD COLUMN entryTime TEXT');
+      console.log('✅ SQLite: Migrated trades table — added entryTime');
     }
     
     useSqlite = true;

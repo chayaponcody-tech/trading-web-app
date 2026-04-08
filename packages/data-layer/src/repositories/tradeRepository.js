@@ -34,8 +34,8 @@ export function appendTrade(trade) {
 
       // 2. Insert into trades (Close History UI)
       db.prepare(`
-        INSERT INTO trades (botId, symbol, type, entryPrice, exitPrice, pnl, exitTime, reason, strategy, entryReason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trades (botId, symbol, type, entryPrice, exitPrice, pnl, entryTime, exitTime, reason, strategy, entryReason)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         trade.botId,
         trade.symbol,
@@ -43,6 +43,7 @@ export function appendTrade(trade) {
         trade.entryPrice,
         trade.exitPrice,
         trade.pnl || 0,
+        trade.entryTime || null,
         trade.exitTime,
         trade.reason,
         trade.strategy,
