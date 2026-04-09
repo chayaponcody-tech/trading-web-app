@@ -14,7 +14,7 @@ import { callOpenRouter } from './OpenRouterClient.js';
 export async function reviewBot(bot, closePrices, apiKey, model) {
   if (!apiKey) return { shouldUpdate: false, reason: 'No API key' };
 
-  const { symbol, strategy, tpPercent, slPercent, leverage, interval } = bot.config;
+  const { symbol, strategy, tpPercent, slPercent, leverage, interval, gridUpper, gridLower } = bot.config;
   const currPrice = closePrices.at(-1);
   const recentTrades = (bot.trades || []).slice(-10).map(t => ({
     side: t.type,
@@ -22,8 +22,16 @@ export async function reviewBot(bot, closePrices, apiKey, model) {
     exit: t.reason?.slice(0, 20)
   }));
 
+  const isGrid = ['GRID', 'AI_GRID', 'AI_GRID_SCALP', 'AI_GRID_SWING'].includes(strategy);
+  const gridContext = isGrid
+    ? `\nGrid Boundaries: upper=${gridUpper || 'N/A'}, lower=${gridLower || 'N/A'}, current=${currPrice}`
+    : '';
+  const gridResponseFields = isGrid
+    ? `\n  "grid_upper": ${gridUpper || currPrice * 1.02},\n  "grid_lower": ${gridLower || currPrice * 0.98},`
+    : '';
+
   const prompt = `You are a SENIOR QUANT STRATEGIST. Review Bot [${bot.id}] (${symbol}).
-Current: Strategy=${strategy}, TP=${tpPercent}%, SL=${slPercent}%, Leverage=${leverage}x
+Current: Strategy=${strategy}, TP=${tpPercent}%, SL=${slPercent}%, Leverage=${leverage}x${gridContext}
 Current Price: ${currPrice}
 Recent Performance: ${JSON.stringify(recentTrades)}
 
@@ -31,6 +39,7 @@ TASK:
 1. Review volatility and market phase.
 2. Suggest optimization only if R/R is poor.
 3. If current setup is good, set "should_update": false.
+${isGrid ? '4. For GRID strategy: recalculate grid_upper/grid_lower based on current price action if boundaries are stale.' : ''}
 
 RESPONSE FORMAT (JSON only, no preamble, keep "reason" under 150 chars):
 {
@@ -38,7 +47,7 @@ RESPONSE FORMAT (JSON only, no preamble, keep "reason" under 150 chars):
   "strategy": "${strategy}",
   "tp": ${tpPercent},
   "sl": ${slPercent},
-  "leverage": ${leverage},
+  "leverage": ${leverage},${gridResponseFields}
   "reason": "Brief summary in Thai"
 }
 Only set "should_update" to true for meaningful improvements.`;

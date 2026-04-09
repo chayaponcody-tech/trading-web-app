@@ -378,7 +378,22 @@ export class BotManager {
                 bot.currentThought = `✅ [Microstructure OK] ${microOk.note}`;
                 bot.lastThoughtAt = new Date().toISOString();
               }
-              await this._openPosition(bot, signal, currPrice, closes);
+              // ── Strategy AI Filter (Python) ────────────────────────────
+              const aiMode = this.config.strategyAiMode || 'off';
+              if (aiMode !== 'off') {
+                const aiResult = await this._strategyAiFilter(bot, signal, closes, currPrice);
+                if (!aiResult.approved) {
+                  bot.currentThought = `🤖 [Strategy AI Block] ${aiResult.reason}`;
+                  bot.lastThoughtAt = new Date().toISOString();
+                  console.log(`[Bot ${botId}] Entry blocked by Strategy AI: ${aiResult.reason}`);
+                } else {
+                  bot.currentThought = `🤖 [Strategy AI OK] confidence=${(aiResult.confidence * 100).toFixed(0)}% — ${aiResult.reason}`;
+                  bot.lastThoughtAt = new Date().toISOString();
+                  await this._openPosition(bot, signal, currPrice, closes);
+                }
+              } else {
+                await this._openPosition(bot, signal, currPrice, closes);
+              }
             }
           } else {
             console.log(`[Bot ${botId}] Entry skipped: Cooldown active`);
@@ -476,8 +491,9 @@ export class BotManager {
     // Get AI-recommended entry steps or default to simple 100% Market if none
     let steps = bot.config.entry_steps || [{ type: 'MARKET', weightPct: 100, offsetPct: 0 }];
 
-    // If strategy is GRID and manual range is set, dynamically generate layering steps
-    if (bot.config.strategy === 'GRID' && bot.config.gridUpper && bot.config.gridLower) {
+    // If strategy is GRID variant and manual range is set, dynamically generate layering steps
+    const isGridStrategy = ['GRID', 'AI_GRID', 'AI_GRID_SCALP', 'AI_GRID_SWING'].includes(bot.config.strategy);
+    if (isGridStrategy && bot.config.gridUpper && bot.config.gridLower) {
         const layers = bot.config.gridLayers || 10;
         const targetPrice = signal === 'LONG' ? bot.config.gridLower : bot.config.gridUpper;
         const totalOffset = ((targetPrice - currPrice) / currPrice) * 100;
@@ -778,6 +794,97 @@ export class BotManager {
       console.warn(`[Bot ${bot.id}] Microstructure check failed (non-blocking): ${e.message}`);
       return { pass: true, note: 'Microstructure data unavailable — skipped filter' };
     }
+  }
+
+  // ─── Strategy AI Filter (Python Container) ──────────────────────────────────
+  // Calls the Python strategy-ai service to get ML-based signal confirmation.
+  // Returns { approved: bool, confidence: float, reason: string }
+
+  // Cache health status to avoid pinging every tick
+  _strategyAiOnline = null;
+  _strategyAiLastCheck = 0;
+  _STRATEGY_AI_HEALTH_TTL = 60_000; // re-check every 60s
+
+  async _checkStrategyAiHealth() {
+    const now = Date.now();
+    if (now - this._strategyAiLastCheck < this._STRATEGY_AI_HEALTH_TTL && this._strategyAiOnline !== null) {
+      return this._strategyAiOnline;
+    }
+    const url = this.config.strategyAiUrl || 'http://strategy-ai:8000';
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch(`${url}/health`, { signal: controller.signal });
+      clearTimeout(timeout);
+      this._strategyAiOnline = res.ok;
+    } catch {
+      this._strategyAiOnline = false;
+    }
+    this._strategyAiLastCheck = now;
+    return this._strategyAiOnline;
+  }
+
+  async _strategyAiFilter(bot, signal, closes, currPrice) {
+    // Check health first (cached, non-blocking)
+    const isOnline = await this._checkStrategyAiHealth();
+    if (!isOnline) {
+      console.warn(`[Bot ${bot.id}] Strategy AI offline — skipping filter`);
+      return { approved: true, confidence: 1.0, reason: 'Strategy AI offline — skipped filter' };
+    }
+
+    const url = this.config.strategyAiUrl || 'http://strategy-ai:8000';
+    const threshold = this.config.strategyAiConfidenceThreshold ?? 0.70;
+    const mode = this.config.strategyAiMode || 'ml';
+
+    try {
+      const payload = {
+        symbol: bot.config.symbol,
+        signal,
+        mode,
+        closes: closes.slice(-60),
+        current_price: currPrice,
+        strategy: bot.config.strategy,
+        interval: bot.config.interval || '1h',
+      };
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      const res = await fetch(`${url}/analyze-signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!res.ok) throw new Error(`Strategy AI returned ${res.status}`);
+
+      const data = await res.json();
+      const confidence = data.confidence ?? 0;
+      const approved = data.signal !== 'NONE' && confidence >= threshold;
+
+      return {
+        approved,
+        confidence,
+        reason: data.reason || `confidence=${(confidence * 100).toFixed(0)}%`,
+      };
+    } catch (e) {
+      this._strategyAiOnline = false; // invalidate cache on error
+      console.warn(`[Bot ${bot.id}] Strategy AI error (non-blocking): ${e.message}`);
+      return { approved: true, confidence: 1.0, reason: 'Strategy AI error — skipped filter' };
+    }
+  }
+
+  // Expose health status for API
+  async getStrategyAiStatus() {
+    const online = await this._checkStrategyAiHealth();
+    return {
+      online,
+      url: this.config.strategyAiUrl || 'http://strategy-ai:8000',
+      mode: this.config.strategyAiMode || 'off',
+      lastCheck: new Date(this._strategyAiLastCheck).toISOString(),
+    };
   }
 
   // ─── Auto Re-attach Orphan Positions ────────────────────────────────────────

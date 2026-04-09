@@ -14,7 +14,10 @@ export function loadBinanceConfig() {
     openRouterKey: process.env.OPENROUTER_API_KEY || jsonConfig.openRouterKey || '',
     openRouterModel: process.env.OPENROUTER_MODEL || jsonConfig.openRouterModel || 'meta-llama/llama-3.1-8b-instruct',
     telegramToken: process.env.TELEGRAM_TOKEN || jsonConfig.telegramToken || '',
-    telegramChatId: process.env.TELEGRAM_CHAT_ID || jsonConfig.telegramChatId || ''
+    telegramChatId: process.env.TELEGRAM_CHAT_ID || jsonConfig.telegramChatId || '',
+    strategyAiMode: process.env.STRATEGY_AI_MODE || jsonConfig.strategyAiMode || 'off',
+    strategyAiUrl: process.env.STRATEGY_AI_URL || jsonConfig.strategyAiUrl || 'http://strategy-ai:8000',
+    strategyAiConfidenceThreshold: parseFloat(process.env.STRATEGY_AI_CONFIDENCE_THRESHOLD || jsonConfig.strategyAiConfidenceThreshold || 0.70),
   };
 }
 

@@ -36,6 +36,9 @@ export const DEFAULT_BINANCE_CONFIG = {
   openRouterModel: 'google/gemini-2.0-flash-exp:free',
   telegramToken: '',
   telegramChatId: '',
+  strategyAiMode: 'off',
+  strategyAiUrl: 'http://strategy-ai:8000',
+  strategyAiConfidenceThreshold: 0.70,
 };
 
 export const PORT = parseInt(process.env.PORT || '4001', 10);

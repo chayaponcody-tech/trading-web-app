@@ -14,14 +14,17 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
       hasOpenRouter: !!cfg.openRouterKey,
       openRouterModel: cfg.openRouterModel,
       telegramChatId: cfg.telegramChatId || '',
-      hasTelegram: !!(cfg.telegramToken && cfg.telegramChatId)
+      hasTelegram: !!(cfg.telegramToken && cfg.telegramChatId),
+      strategyAiMode: cfg.strategyAiMode || 'off',
+      strategyAiUrl: cfg.strategyAiUrl || 'http://strategy-ai:8000',
+      strategyAiConfidenceThreshold: cfg.strategyAiConfidenceThreshold ?? 0.70,
     });
   });
 
   r.post('/', async (req, res, next) => {
     try {
-      const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId } = req.body;
-      patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId });
+      const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold } = req.body;
+      patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold });
 
       const updated = loadBinanceConfig();
 
@@ -45,6 +48,16 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
 
       res.json({ success: true });
     } catch (e) { next(e); }
+  });
+
+  // ─── Strategy AI Health Check ─────────────────────────────────────────────
+  r.get('/strategy-ai/status', async (req, res) => {
+    try {
+      const status = await botManager.getStrategyAiStatus();
+      res.json(status);
+    } catch (e) {
+      res.json({ online: false, url: '', mode: 'off', lastCheck: new Date().toISOString() });
+    }
   });
 
   return r;

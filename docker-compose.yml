@@ -34,6 +34,9 @@ services:
       - "8001:8000"
     environment:
       - GATEWAY_INTERNAL_URL=http://backend:4001
+      - STRATEGY_AI_MODE=${STRATEGY_AI_MODE:-off}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-meta-llama/llama-3.1-8b-instruct}
     depends_on:
       - backend
     restart: always

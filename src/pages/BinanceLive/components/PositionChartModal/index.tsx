@@ -25,9 +25,9 @@ export default function PositionChartModal({
     : 0;
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '16px' }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, padding: '24px' }}>
       <div className="glass-panel" style={{ 
-        width: '100%', maxWidth: '1100px', height: 'calc(100vh - 32px)',
+        width: '100%', maxWidth: '900px', height: '70vh', minHeight: '480px', maxHeight: '700px',
         display: 'flex', flexDirection: 'column', background: '#131722', border: '1px solid #333', 
         borderRadius: '12px', overflow: 'hidden', boxShadow: '0 20px 50px rgba(0,0,0,0.5)'
       }}>

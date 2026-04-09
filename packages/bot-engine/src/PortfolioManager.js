@@ -289,7 +289,13 @@ export class PortfolioManager {
           aiModel: this.config.aiModel || binanceCfg.openRouterModel,
           aiType: this.config.riskMode,
           exchange: 'binance_testnet',
-          managedBy: this.managerId 
+          managedBy: this.managerId,
+          // Map entry steps from AI recommendation
+          entry_steps: recommendedStrategy.entry_steps || null,
+          // Map grid boundaries (AI returns snake_case, engine uses camelCase)
+          gridUpper: recommendedStrategy.grid_upper || null,
+          gridLower: recommendedStrategy.grid_lower || null,
+          gridLayers: recommendedStrategy.gridLayers || 10,
         };
 
         await this.botManager.startBot(botConfig);
