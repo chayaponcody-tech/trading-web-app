@@ -243,6 +243,8 @@ export class BotManager {
 
       if (!Array.isArray(klines)) return;
 
+      bot._lastKlines = klines;
+
       const closed = klines.slice(0, -1);
       const closes = closed.map((k) => parseFloat(k[4]));
       const lastCloseTime = closed.at(-1)?.[6] ?? null;
@@ -367,30 +369,33 @@ export class BotManager {
         if ((signal === 'LONG' || signal === 'SHORT') && bot.openPositions.length === 0) {
           const lastExit = bot.lastExitTime ? new Date(bot.lastExitTime).getTime() : 0;
           if (Date.now() - lastExit >= cooldownMinutes * 60_000) {
-            // ── Microstructure Filter (OI + Funding) ──────────────────────
-            const microOk = await this._checkMicrostructure(bot, symbol, signal);
-            if (!microOk.pass) {
-              bot.currentThought = `⚠️ [Microstructure Block] ${microOk.reason}`;
-              bot.lastThoughtAt = new Date().toISOString();
-              console.log(`[Bot ${botId}] Entry blocked by microstructure: ${microOk.reason}`);
-            } else {
-              if (microOk.note) {
-                bot.currentThought = `✅ [Microstructure OK] ${microOk.note}`;
+            // ── Strategy AI Filter (Python) — includes Microstructure ──────
+            // JS fetches OI + Funding and passes to Python for unified analysis
+            const aiMode = this.config.strategyAiMode || 'off';
+            if (aiMode !== 'off') {
+              const aiResult = await this._strategyAiFilter(bot, signal, closes, currPrice);
+              if (!aiResult.approved) {
+                bot.currentThought = `🤖 [Strategy AI Block] ${aiResult.reason}`;
                 bot.lastThoughtAt = new Date().toISOString();
-              }
-              // ── Strategy AI Filter (Python) ────────────────────────────
-              const aiMode = this.config.strategyAiMode || 'off';
-              if (aiMode !== 'off') {
-                const aiResult = await this._strategyAiFilter(bot, signal, closes, currPrice);
-                if (!aiResult.approved) {
-                  bot.currentThought = `🤖 [Strategy AI Block] ${aiResult.reason}`;
-                  bot.lastThoughtAt = new Date().toISOString();
-                  console.log(`[Bot ${botId}] Entry blocked by Strategy AI: ${aiResult.reason}`);
-                } else {
-                  bot.currentThought = `🤖 [Strategy AI OK] confidence=${(aiResult.confidence * 100).toFixed(0)}% — ${aiResult.reason}`;
-                  bot.lastThoughtAt = new Date().toISOString();
-                  await this._openPosition(bot, signal, currPrice, closes);
+                console.log(`[Bot ${botId}] Entry blocked by Strategy AI: ${aiResult.reason}`);
+              } else {
+                bot.currentThought = `🤖 [Strategy AI OK] confidence=${(aiResult.confidence * 100).toFixed(0)}% — ${aiResult.reason}`;
+                bot.lastThoughtAt = new Date().toISOString();
+                bot._pendingPythonStoploss = aiResult.stoploss;
+                await this._openPosition(bot, signal, currPrice, closes);
+                if (bot._pendingPythonStoploss != null && bot.openPositions.length > 0) {
+                  const pos = bot.openPositions.at(-1);
+                  pos.pythonStoploss = bot._pendingPythonStoploss;
+                  pos.entryReason = (pos.entryReason || '') + ` | SL=${bot._pendingPythonStoploss.toFixed(4)}`;
                 }
+                delete bot._pendingPythonStoploss;
+              }
+            } else {
+              // strategyAiMode = 'off' → still run lightweight microstructure check in JS
+              const microOk = await this._checkMicrostructure(bot, symbol, signal);
+              if (!microOk.pass) {
+                bot.currentThought = `⚠️ [Microstructure Block] ${microOk.reason}`;
+                bot.lastThoughtAt = new Date().toISOString();
               } else {
                 await this._openPosition(bot, signal, currPrice, closes);
               }
@@ -832,25 +837,52 @@ export class BotManager {
       return { approved: true, confidence: 1.0, reason: 'Strategy AI offline — skipped filter' };
     }
 
-    const url = this.config.strategyAiUrl || 'http://strategy-ai:8000';
-    const threshold = this.config.strategyAiConfidenceThreshold ?? 0.70;
-    const mode = this.config.strategyAiMode || 'ml';
+    const url          = this.config.strategyAiUrl || 'http://strategy-ai:8000';
+    const threshold    = this.config.strategyAiConfidenceThreshold ?? 0.70;
+    const strategyName = bot.config.strategyName;
+
+    const useNewEndpoint = strategyName;
+    const endpoint = useNewEndpoint ? '/strategy/analyze' : '/analyze-signal';
+
+    const klines = bot._lastKlines || [];
+
+    // ── Fetch OI + Funding to pass to Python (microstructure moved to Python) ──
+    let fundingRate = null;
+    let oiChangePct = null;
+    try {
+      const [fundingData, oiHistory] = await Promise.all([
+        this.exchange.getFundingRate(bot.config.symbol).catch(() => null),
+        this.exchange.getOpenInterestStatistics(bot.config.symbol, '15m', 3).catch(() => []),
+      ]);
+      fundingRate = fundingData?.lastFundingRate ?? null;
+      if (Array.isArray(oiHistory) && oiHistory.length >= 2) {
+        const oiNow  = parseFloat(oiHistory.at(-1)?.sumOpenInterest ?? 0);
+        const oiPrev = parseFloat(oiHistory.at(-2)?.sumOpenInterest ?? 0);
+        if (oiPrev > 0) oiChangePct = (oiNow - oiPrev) / oiPrev * 100;
+      }
+    } catch (e) {
+      console.warn(`[Bot ${bot.id}] Could not fetch microstructure data: ${e.message}`);
+    }
+
+    const payload = useNewEndpoint
+      ? {
+          symbol:             bot.config.symbol,
+          strategy:           strategyName,
+          closes:             klines.slice(-100).map(k => parseFloat(k[4])),
+          highs:              klines.slice(-100).map(k => parseFloat(k[2])),
+          lows:               klines.slice(-100).map(k => parseFloat(k[3])),
+          volumes:            klines.slice(-100).map(k => parseFloat(k[5])),
+          signal,
+          funding_rate:       fundingRate,
+          oi_change_pct:      oiChangePct,
+          funding_threshold:  bot.config.fundingThreshold ?? 0.0005,
+        }
+      : { symbol: bot.config.symbol, signal, mode: this.config.strategyAiMode || 'ml', closes: closes.slice(-60) };
 
     try {
-      const payload = {
-        symbol: bot.config.symbol,
-        signal,
-        mode,
-        closes: closes.slice(-60),
-        current_price: currPrice,
-        strategy: bot.config.strategy,
-        interval: bot.config.interval || '1h',
-      };
-
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 5000);
-
-      const res = await fetch(`${url}/analyze-signal`, {
+      const res = await fetch(`${url}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -859,20 +891,40 @@ export class BotManager {
       clearTimeout(timeout);
 
       if (!res.ok) throw new Error(`Strategy AI returned ${res.status}`);
-
       const data = await res.json();
+
       const confidence = data.confidence ?? 0;
-      const approved = data.signal !== 'NONE' && confidence >= threshold;
+      const approved   = data.signal !== 'NONE' && confidence >= threshold;
+
+      // Log microstructure result if available
+      if (data.microstructure) {
+        const m = data.microstructure;
+        console.log(
+          `[Bot ${bot.id}] 🔬 microstructure passed=${m.passed} ` +
+          `funding=${(m.funding_rate * 100).toFixed(4)}% OI=${m.oi_change_pct?.toFixed(1)}%`
+        );
+      }
+
+      console.log(
+        `[Bot ${bot.id}] 🐍 strategy=${data.strategy ?? strategyName} ` +
+        `signal=${data.signal} confidence=${(confidence * 100).toFixed(0)}% ` +
+        `stoploss=${data.stoploss ?? 'N/A'}`
+      );
 
       return {
         approved,
         confidence,
+        stoploss: data.stoploss ?? null,
         reason: data.reason || `confidence=${(confidence * 100).toFixed(0)}%`,
       };
     } catch (e) {
-      this._strategyAiOnline = false; // invalidate cache on error
-      console.warn(`[Bot ${bot.id}] Strategy AI error (non-blocking): ${e.message}`);
-      return { approved: true, confidence: 1.0, reason: 'Strategy AI error — skipped filter' };
+      if (e.name === 'AbortError') {
+        console.warn(`[Bot ${bot.id}] Strategy AI timeout — fallback to SignalEngine`);
+      } else {
+        console.warn(`[Bot ${bot.id}] Strategy AI error — fallback: ${e.message}`);
+      }
+      this._strategyAiOnline = false;
+      return { approved: true, confidence: 1.0, reason: 'Strategy AI error — fallback' };
     }
   }
 

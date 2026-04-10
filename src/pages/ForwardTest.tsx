@@ -11,6 +11,10 @@ const STRATEGIES = [
   { value: 'BB_RSI', label: '⚡ BB + RSI' },
   { value: 'EMA_BB_RSI', label: '⚡ EMA + BB + RSI' },
   { value: 'GRID', label: '🌐 Grid Trading (Mean Reversion)' },
+  { value: 'AI_SCOUTER', label: '🏹 AI Scouting (5m Scalp)' },
+  { value: 'EMA_SCALP', label: '⚡ EMA Scalp (3/8 Fast)' },
+  { value: 'STOCH_RSI', label: '🎯 Stochastic RSI Scalp' },
+  { value: 'VWAP_SCALP', label: '📊 VWAP Scalp + Momentum' },
 ];
 
 

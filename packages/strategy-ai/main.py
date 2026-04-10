@@ -1,8 +1,14 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import requests
 import numpy as np
+
+from registry import StrategyRegistry
+from strategies.bollinger_breakout import BollingerBreakout
+from confidence_engine import ConfidenceEngine
+from microstructure_filter import check as microstructure_check
+from schemas import AnalyzeRequest, AnalyzeResponse, StrategyListResponse
 
 app = FastAPI(title="CryptoSmartTrade - Strategy AI (Quant Brain)")
 
@@ -17,6 +23,19 @@ GATEWAY_URL = os.environ.get("GATEWAY_INTERNAL_URL", "http://backend:4001")
 AI_MODE = os.environ.get("STRATEGY_AI_MODE", "ml")  # off | ml | full
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct")
+
+CONFIDENCE_THRESHOLD = 0.60
+
+# ─── Registry Bootstrap ───────────────────────────────────────────────────────
+
+registry = StrategyRegistry()
+registry.register("bb_breakout", BollingerBreakout())
+
+confidence_engine = ConfidenceEngine(
+    mode=AI_MODE,
+    openrouter_key=OPENROUTER_API_KEY,
+    openrouter_model=OPENROUTER_MODEL,
+)
 
 
 # ─── Feature Engineering ──────────────────────────────────────────────────────
@@ -226,6 +245,91 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok", "mode": AI_MODE}
+
+
+@app.post("/strategy/analyze", response_model=AnalyzeResponse)
+async def strategy_analyze(req: AnalyzeRequest):
+    """
+    Main analysis endpoint.
+    1. Run strategy to get raw signal from OHLCV
+    2. Run microstructure filter (Funding + OI) — replaces JS _checkMicrostructure
+    3. Compute confidence score
+    4. Return final signal + confidence + stoploss
+    """
+    try:
+        strategy = registry.get(req.strategy)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # ── Step 1: Strategy computes signal from raw OHLCV ──────────────────────
+    result = strategy.compute_signal(req.closes, req.highs, req.lows, req.volumes, req.params)
+    raw_signal = result["signal"]
+
+    # ── Step 2: Microstructure Filter (Funding Rate + OI) ────────────────────
+    micro = microstructure_check(
+        signal=raw_signal,
+        funding_rate=req.funding_rate,
+        oi_change_pct=req.oi_change_pct,
+        funding_threshold=req.funding_threshold or 0.0005,
+    )
+
+    micro_detail = {
+        "passed": micro.passed,
+        "reason": micro.reason,
+        "funding_rate": micro.funding_rate,
+        "oi_change_pct": micro.oi_change_pct,
+        "penalty": micro.penalty,
+    }
+
+    if not micro.passed:
+        print(f"🚫 [{req.symbol}] Microstructure BLOCK: {micro.reason}")
+        return AnalyzeResponse(
+            symbol=req.symbol,
+            signal="NONE",
+            confidence=0.0,
+            stoploss=None,
+            reason=f"[Microstructure Block] {micro.reason}",
+            metadata=result["metadata"],
+            strategy=req.strategy,
+            microstructure=micro_detail,
+        )
+
+    # ── Step 3: Feature engineering + Confidence score ───────────────────────
+    features = compute_features(req.closes)
+    regime = detect_regime(features)
+
+    confidence, reason = confidence_engine.score(
+        raw_signal, features, regime, result["metadata"]
+    )
+
+    # Apply microstructure soft penalty
+    if micro.penalty > 0:
+        confidence = max(0.0, confidence - micro.penalty)
+        reason = f"{reason} | OI penalty -{micro.penalty:.0%}"
+
+    final_signal = raw_signal if confidence >= CONFIDENCE_THRESHOLD else "NONE"
+
+    print(
+        f"🧠 [{req.symbol}] strategy={req.strategy} signal={raw_signal}→{final_signal} "
+        f"confidence={confidence:.0%} regime={regime} | {reason}"
+    )
+
+    return AnalyzeResponse(
+        symbol=req.symbol,
+        signal=final_signal,
+        confidence=round(confidence, 4),
+        stoploss=result["stoploss"] if final_signal != "NONE" else None,
+        reason=reason,
+        metadata=result["metadata"],
+        strategy=req.strategy,
+        microstructure=micro_detail,
+    )
+
+
+@app.get("/strategy/list", response_model=StrategyListResponse)
+async def strategy_list():
+    """Return all registered strategy keys."""
+    return StrategyListResponse(strategies=registry.list_keys())
 
 
 @app.post("/analyze-signal")

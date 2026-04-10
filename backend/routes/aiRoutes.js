@@ -7,7 +7,7 @@ const router = express.Router();
 
 router.post('/ai-recommend', async (req, res) => {
     const config = dbService.loadBinanceConfig();
-    const { symbol, interval, mode } = req.body;
+    const { symbol, interval, mode, strategy } = req.body;
     
     if (!config.apiKey || !config.apiSecret || !config.openRouterKey) {
         return res.status(400).json({ error: 'API Keys not set' });
@@ -17,7 +17,7 @@ router.post('/ai-recommend', async (req, res) => {
     try {
         const klines = await service.getKlines(symbol, interval || '1h', 100);
         const closes = klines.map(k => parseFloat(k[4]));
-        const aiResponse = await aiService.getBotRecommendations(closes, 1, mode || 'confident', config.openRouterKey, config.openRouterModel, symbol);
+        const aiResponse = await aiService.getBotRecommendations(closes, 1, mode || 'confident', config.openRouterKey, config.openRouterModel, symbol, strategy);
         res.json(aiResponse);
     } catch (e) {
         res.status(500).json({ error: e.message });

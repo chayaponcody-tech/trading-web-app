@@ -8,9 +8,12 @@ import {
 const API = '';
 
 const RISK_MODES = [
-  { value: 'confident', label: '✨ AI Precision', desc: 'EMA_RSI 15m — Trend following, high winrate' },
-  { value: 'scout',     label: '🏹 Trend Scout',  desc: 'AI_SCOUTER 5m — Aggressive scalping' },
-  { value: 'grid',      label: '📈 AI Grid Pro',  desc: 'AI_GRID 1h — Range trading, balanced' },
+  { value: 'confident', label: '✨ AI Precision',   desc: 'EMA_RSI 15m — Trend following, high winrate' },
+  { value: 'scout',     label: '🏹 Trend Scout',    desc: 'AI_SCOUTER 5m — Aggressive scalping' },
+  { value: 'grid',      label: '📈 AI Grid Pro',    desc: 'AI_GRID 1h — Range trading, balanced' },
+  { value: 'ema_scalp', label: '⚡ EMA Scalp',      desc: 'EMA_SCALP 5m — EMA 3/8 fast cross' },
+  { value: 'stoch_rsi', label: '🎯 Stoch RSI',      desc: 'STOCH_RSI 5m — Micro-cycle scalping' },
+  { value: 'vwap_scalp',label: '📊 VWAP Scalp',     desc: 'VWAP_SCALP 5m — Retest + momentum' },
 ];
 
 const AI_MODELS = [

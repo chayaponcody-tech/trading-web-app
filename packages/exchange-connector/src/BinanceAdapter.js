@@ -116,9 +116,17 @@ export class BinanceAdapter extends BaseExchange {
     }
   }
 
-  async getKlines(symbol, interval, limit = 100) {
+  async getKlines(symbol, interval, limit = 100, since = undefined, until = undefined) {
     try {
-      return await this._getPublic().fetchOHLCV(symbol.toUpperCase(), interval.toLowerCase(), undefined, limit);
+      // ccxt fetchOHLCV: (symbol, timeframe, since, limit, params)
+      const params = until ? { endTime: until } : {};
+      return await this._getPublic().fetchOHLCV(
+        symbol.toUpperCase(),
+        interval.toLowerCase(),
+        since,
+        limit,
+        params,
+      );
     } catch (e) {
       throw new Error(`[BinanceAdapter] getKlines error: ${e.message}`);
     }

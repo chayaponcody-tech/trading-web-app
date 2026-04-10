@@ -83,7 +83,9 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
     
     try {
       if (pm) {
-        const updated = await pm.updateConfig(req.body);
+        // Strip isAutonomous from config update — toggle route handles start/stop + persist
+        const { isAutonomous, ...configWithoutAuto } = req.body;
+        const updated = await pm.updateConfig(configWithoutAuto);
         res.json({ message: 'Fleet settings updated', config: updated });
       } else {
         const fleet = getFleetById(id);
@@ -127,7 +129,20 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
     if (pm) {
         if (active) pm.start();
         else pm.stop();
-        res.json({ isRunning: pm.isRunning });
+
+        // Sync in-memory config
+        pm.config.isAutonomous = !!active;
+
+        // ─── Persist state to DB so it survives restart ───────────────────
+        const fleet = getFleetById(id);
+        if (fleet) {
+            upsertFleet({
+                ...fleet,
+                isRunning: active ? 1 : 0,
+                config: { ...fleet.config, isAutonomous: !!active }
+            });
+        }
+        res.json({ isRunning: pm.isRunning, isAutonomous: !!active });
     } else {
         res.status(404).json({ error: 'Manager not available' });
     }

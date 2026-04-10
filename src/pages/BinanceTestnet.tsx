@@ -15,6 +15,9 @@ const STRATEGIES = [
   { value: 'GRID', label: 'Grid Bot Simulation' },
   { value: 'AI_GRID', label: '🤖 AI Grid (Range Trading)' },
   { value: 'AI_SCOUTER', label: '🏹 AI Scouting (5m Scalp)' },
+  { value: 'EMA_SCALP', label: '⚡ EMA Scalp (3/8 Fast)' },
+  { value: 'STOCH_RSI', label: '🎯 Stochastic RSI Scalp' },
+  { value: 'VWAP_SCALP', label: '📊 VWAP Scalp + Momentum' },
 ];
 
 const INTERVALS = ['5m', '15m', '1h', '4h', '1d'];

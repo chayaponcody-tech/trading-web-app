@@ -4,6 +4,9 @@ import { BollingerBandsStrategy } from './strategies/BollingerBands.js';
 import { GridStrategy } from './strategies/Grid.js';
 import { ScouterStrategy } from './strategies/Scouter.js';
 import { EMA_RSI, BB_RSI, EMA_BB_RSI } from './strategies/Composite.js';
+import { EMAScalpStrategy } from './strategies/EMAScalp.js';
+import { StochRSIStrategy } from './strategies/StochRSI.js';
+import { VWAPScalpStrategy } from './strategies/VWAPScalp.js';
 
 // ─── Signal Engine ────────────────────────────────────────────────────────────
 // The single source of truth for all technical signal computations.
@@ -26,6 +29,10 @@ const STRATEGY_REGISTRY = {
   EMA_RSI:     EMA_RSI,
   BB_RSI:      BB_RSI,
   EMA_BB_RSI:  EMA_BB_RSI,
+  // ─── Scalping Strategies ───────────────────────────────────────────────────
+  EMA_SCALP:   EMAScalpStrategy,
+  STOCH_RSI:   StochRSIStrategy,
+  VWAP_SCALP:  VWAPScalpStrategy,
   // Add more here...
 };
 

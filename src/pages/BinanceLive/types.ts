@@ -14,6 +14,9 @@ export const STRATEGIES = [
   { value: 'AI_GRID_SCALP', label: '⚡ AI Grid (Scalping - 15m)' },
   { value: 'AI_GRID_SWING', label: '🏛️ AI Grid (Swing - 1h)' },
   { value: 'AI_SCOUTER', label: '🏹 AI Scouting (5m Scalp)' },
+  { value: 'EMA_SCALP', label: '⚡ EMA Scalp (3/8 Fast)' },
+  { value: 'STOCH_RSI', label: '🎯 Stochastic RSI Scalp' },
+  { value: 'VWAP_SCALP', label: '📊 VWAP Scalp + Momentum' },
 ];
 
 export const INTERVALS = ['5m', '15m', '1h', '4h', '1d'];

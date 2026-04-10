@@ -127,6 +127,37 @@ export function initDb() {
       db.exec('ALTER TABLE trades ADD COLUMN entryTime TEXT');
       console.log('✅ SQLite: Migrated trades table — added entryTime');
     }
+
+    // Migrate — add backtest tables if missing
+    const backtestResultsColumns = db.prepare('PRAGMA table_info(backtest_results)').all();
+    if (backtestResultsColumns.length === 0) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS backtest_results (
+          backtestId  TEXT PRIMARY KEY,
+          symbol      TEXT NOT NULL,
+          strategy    TEXT NOT NULL,
+          interval    TEXT NOT NULL,
+          config      TEXT NOT NULL,
+          metrics     TEXT NOT NULL,
+          createdAt   TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS backtest_trades (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          backtestId  TEXT NOT NULL,
+          symbol      TEXT,
+          type        TEXT,
+          entryPrice  REAL,
+          exitPrice   REAL,
+          entryTime   TEXT,
+          exitTime    TEXT,
+          pnl         REAL,
+          pnlPct      REAL,
+          exitReason  TEXT,
+          FOREIGN KEY (backtestId) REFERENCES backtest_results(backtestId)
+        );
+      `);
+      console.log('✅ SQLite: Migrated — added backtest_results and backtest_trades tables');
+    }
     
     useSqlite = true;
     console.log('✅ DataLayer: SQLite Engine Active');

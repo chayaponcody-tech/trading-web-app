@@ -7,9 +7,11 @@ import {
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 const TABS = [
-  { id: 'overview', label: '🗺️ ภาพรวมระบบ' },
-  { id: 'data', label: '📡 Data Reference' },
-  { id: 'workflow', label: '🔄 Deep Workflow' },
+  { id: 'overview',    label: '🗺️ ภาพรวมระบบ' },
+  { id: 'data',        label: '📡 Data Reference' },
+  { id: 'workflow',    label: '🔄 Deep Workflow' },
+  { id: 'strategies',  label: '📘 กลยุทธ์ทั้งหมด' },
+  { id: 'backtest',    label: '🧪 Backtest Workflow' },
 ];
 
 export default function SystemOverview() {
@@ -33,6 +35,8 @@ export default function SystemOverview() {
       {activeTab === 'overview' && <OverviewTab />}
       {activeTab === 'data' && <DataReferenceTab />}
       {activeTab === 'workflow' && <DeepWorkflowTab />}
+      {activeTab === 'strategies' && <StrategiesTab />}
+      {activeTab === 'backtest' && <BacktestWorkflowTab />}
     </div>
   );
 }
@@ -562,6 +566,550 @@ function LifecycleStep({ index, icon, title, desc, color, isAI }: any) {
       <div className={isAI ? 'ai-pulse' : ''} style={{ width: 'fit-content' }}>{icon}</div>
       <h4 style={{ margin: 0, fontSize: '1.1rem' }}>{title}</h4>
       <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.5 }}>{desc}</p>
+    </div>
+  );
+}
+
+// ─── Tab: กลยุทธ์ทั้งหมด ──────────────────────────────────────────────────────
+
+const ALL_STRATEGIES = [
+  {
+    id: 'EMA_CROSS',
+    name: 'EMA Cross (20/50)',
+    emoji: '📈',
+    color: '#faad14',
+    tag: 'Trend Following',
+    timeframe: '15m – 1h',
+    speed: 'ช้า',
+    indicators: ['EMA 20', 'EMA 50'],
+    signal: 'LONG เมื่อ EMA20 ตัดขึ้นเหนือ EMA50 (Golden Cross) / SHORT เมื่อตัดลง (Death Cross)',
+    pros: ['สัญญาณชัดเจน', 'เหมาะกับตลาดมีเทรนด์', 'noise น้อย'],
+    cons: ['ช้า — เข้าช้าออกช้า', 'ไม่เหมาะตลาด sideway', 'ต้องการแท่งเทียนเยอะ'],
+    bestFor: 'ตลาดที่มีเทรนด์ชัดเจน เช่น BTC ช่วง bull run',
+  },
+  {
+    id: 'RSI',
+    name: 'RSI (30/70)',
+    emoji: '🔄',
+    color: '#1890ff',
+    tag: 'Mean Reversion',
+    timeframe: '15m – 4h',
+    speed: 'กลาง',
+    indicators: ['RSI 14'],
+    signal: 'LONG เมื่อ RSI ฟื้นตัวจาก <30 (Oversold) / SHORT เมื่อร่วงจาก >70 (Overbought)',
+    pros: ['จับจุดกลับตัวได้ดี', 'ปรับ threshold ได้', 'รองรับ AI Tuning'],
+    cons: ['ใน strong trend RSI ค้างโซน OB/OS นาน', 'สัญญาณ false ในตลาด volatile'],
+    bestFor: 'ตลาด range-bound หรือหลังราคาวิ่งไกลมาก',
+  },
+  {
+    id: 'BB',
+    name: 'Bollinger Bands (20, 2)',
+    emoji: '🎯',
+    color: '#0ecb81',
+    tag: 'Mean Reversion',
+    timeframe: '15m – 1h',
+    speed: 'กลาง',
+    indicators: ['BB Upper', 'BB Lower', 'BB Middle (SMA20)'],
+    signal: 'LONG เมื่อราคาทะลุ Lower Band แล้วกลับเข้า / SHORT เมื่อทะลุ Upper Band แล้วกลับเข้า',
+    pros: ['เห็น volatility ชัด', 'จับ squeeze ได้', 'ใช้ร่วมกับ indicator อื่นได้ดี'],
+    cons: ['ในตลาด trending ราคาเดินตาม band ได้นาน', 'ต้องการ confirmation'],
+    bestFor: 'เหรียญที่ราคา oscillate ในกรอบ เช่น stablecoin pairs',
+  },
+  {
+    id: 'EMA_RSI',
+    name: 'EMA + RSI',
+    emoji: '⚡',
+    color: '#faad14',
+    tag: 'Composite',
+    timeframe: '15m – 1h',
+    speed: 'กลาง',
+    indicators: ['EMA 20', 'EMA 50', 'RSI 14'],
+    signal: 'LONG เมื่อ EMA Golden Cross + RSI ยังไม่ Overbought (<70) / SHORT เมื่อ Death Cross + RSI ยังไม่ Oversold (>30)',
+    pros: ['กรอง false signal จาก EMA ด้วย RSI', 'winrate สูงกว่า EMA เดี่ยว', 'เหมาะกับ AI Precision mode'],
+    cons: ['สัญญาณน้อยกว่า EMA เดี่ยว', 'ยังช้าอยู่'],
+    bestFor: 'Bot ที่ต้องการ winrate สูง ยอมเข้าน้อยแต่แม่น',
+  },
+  {
+    id: 'BB_RSI',
+    name: 'BB + RSI',
+    emoji: '🔀',
+    color: '#a855f7',
+    tag: 'Composite',
+    timeframe: '15m – 1h',
+    speed: 'กลาง',
+    indicators: ['BB (20,2)', 'RSI 14'],
+    signal: 'LONG เมื่อราคาต่ำกว่า Lower BB และ RSI <30 พร้อมกัน / SHORT เมื่อสูงกว่า Upper BB และ RSI >70',
+    pros: ['double confirmation ลด false signal มาก', 'จับ extreme reversal ได้แม่น'],
+    cons: ['สัญญาณหายากมาก', 'อาจรอนานมากกว่าจะเข้า'],
+    bestFor: 'ตลาดที่ volatile สูง ต้องการจับจุด extreme',
+  },
+  {
+    id: 'EMA_BB_RSI',
+    name: 'EMA + BB + RSI',
+    emoji: '🧠',
+    color: '#f6465d',
+    tag: 'Composite (Triple)',
+    timeframe: '1h – 4h',
+    speed: 'ช้า',
+    indicators: ['EMA 20/50', 'BB (20,2)', 'RSI 14'],
+    signal: 'LONG เมื่อ EMA Cross ขึ้น + (BB LONG หรือ RSI <40) / SHORT เมื่อ EMA Cross ลง + (BB SHORT หรือ RSI >60)',
+    pros: ['สัญญาณแม่นที่สุดในระบบ', 'เหมาะกับ position sizing ใหญ่'],
+    cons: ['สัญญาณน้อยมาก', 'ต้องการ timeframe ยาว'],
+    bestFor: 'Swing trade หรือ bot ที่ถือ position นาน',
+  },
+  {
+    id: 'AI_SCOUTER',
+    name: 'AI Scouter',
+    emoji: '🏹',
+    color: '#f6465d',
+    tag: 'Scalping',
+    timeframe: '5m – 15m',
+    speed: 'เร็ว',
+    indicators: ['SMA 7', 'SMA 14', 'RSI 14'],
+    signal: 'LONG เมื่อ SMA7 > SMA14 และ RSI <55 / SHORT เมื่อ SMA7 < SMA14 และ RSI >45',
+    pros: ['ตอบสนองเร็ว', 'เหมาะ scalping', 'RSI filter ป้องกันเข้าในโซน overextended'],
+    cons: ['noise สูงใน 1m', 'ต้องการ spread ต่ำ'],
+    bestFor: 'เหรียญ volatile สูง เช่น DOGE, PEPE ใน 5m',
+  },
+  {
+    id: 'GRID',
+    name: 'Grid Trading',
+    emoji: '🌐',
+    color: '#00d1ff',
+    tag: 'Range / Grid',
+    timeframe: '1h – 4h',
+    speed: 'ต่อเนื่อง',
+    indicators: ['Grid Upper/Lower', 'Grid Layers'],
+    signal: 'วาง order ซื้อ/ขายเป็นชั้นๆ ในกรอบราคา ทำกำไรจากการแกว่งขึ้นลง',
+    pros: ['ทำกำไรได้แม้ตลาด sideway', 'ไม่ต้องรอสัญญาณ', 'passive income'],
+    cons: ['ขาดทุนหนักถ้าราคาหลุดกรอบ', 'ต้องตั้ง range ให้ถูก'],
+    bestFor: 'ตลาด sideways ที่ราคาแกว่งในกรอบชัดเจน',
+  },
+  {
+    id: 'EMA_SCALP',
+    name: 'EMA Scalp (3/8)',
+    emoji: '⚡',
+    color: '#00ffb4',
+    tag: 'Scalping (ใหม่)',
+    timeframe: '1m – 5m',
+    speed: 'เร็วมาก',
+    indicators: ['EMA 3', 'EMA 8'],
+    signal: 'LONG เมื่อ EMA3 ตัดขึ้นเหนือ EMA8 / SHORT เมื่อ EMA3 ตัดลงใต้ EMA8',
+    pros: ['เร็วที่สุดในระบบ', 'ตอบสนองทุก candle', 'เหมาะ 1m-5m'],
+    cons: ['noise สูงมาก', 'ต้องการ TP/SL แคบ', 'spread กินกำไรได้ถ้าไม่ระวัง'],
+    bestFor: 'เหรียญ high volume ใน 1m-5m เช่น BTC, ETH ช่วงตลาดเปิด',
+  },
+  {
+    id: 'STOCH_RSI',
+    name: 'Stochastic RSI',
+    emoji: '🎯',
+    color: '#a064ff',
+    tag: 'Scalping (ใหม่)',
+    timeframe: '5m – 15m',
+    speed: 'เร็ว',
+    indicators: ['RSI 14', 'Stochastic (14,3) บน RSI'],
+    signal: 'LONG เมื่อ Stoch K ฟื้นตัวจาก <20 (Oversold) / SHORT เมื่อ K ร่วงจาก >80 (Overbought)',
+    pros: ['จับ micro-cycle ได้ดีกว่า RSI ธรรมดา', 'ไวกว่า RSI เดี่ยว', 'เหมาะ scalping รอบสั้น'],
+    cons: ['ซับซ้อนกว่า RSI', 'ต้องการข้อมูลเยอะกว่า', 'อาจ whipsaw ใน choppy market'],
+    bestFor: 'ตลาดที่มี micro-cycle ชัดเจน เช่น altcoin ใน 5m-15m',
+  },
+  {
+    id: 'VWAP_SCALP',
+    name: 'VWAP Scalp',
+    emoji: '📊',
+    color: '#14b4ff',
+    tag: 'Scalping (ใหม่)',
+    timeframe: '1m – 5m',
+    speed: 'เร็ว',
+    indicators: ['VWAP (หรือ EMA20 fallback)', 'RSI 9'],
+    signal: 'LONG เมื่อราคา retest VWAP จากด้านล่าง + RSI momentum ขาขึ้น / SHORT เมื่อ retest จากด้านบน + RSI ขาลง',
+    pros: ['VWAP เป็น institutional level สำคัญ', 'momentum confirm ลด false signal', 'ใช้ volume จริงถ้ามีข้อมูล'],
+    cons: ['ต้องการ volume data สำหรับ VWAP จริง', 'fallback เป็น EMA20 ถ้าไม่มี volume'],
+    bestFor: 'เหรียญ high liquidity ที่ institutional traders ใช้ VWAP เป็น reference',
+  },
+];
+
+function StrategiesTab() {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [filterTag, setFilterTag] = useState('ทั้งหมด');
+
+  const tags = ['ทั้งหมด', 'Trend Following', 'Mean Reversion', 'Composite', 'Scalping', 'Range / Grid'];
+  const filtered = filterTag === 'ทั้งหมด'
+    ? ALL_STRATEGIES
+    : ALL_STRATEGIES.filter(s => s.tag.includes(filterTag));
+
+  const active = ALL_STRATEGIES.find(s => s.id === selected);
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 380px' : '1fr', gap: '1.5rem', alignItems: 'start' }}>
+      {/* Left: grid of cards */}
+      <div>
+        {/* Filter tags */}
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+          {tags.map(t => (
+            <button key={t} onClick={() => setFilterTag(t)} style={{
+              padding: '0.3rem 0.9rem', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 'bold', cursor: 'pointer',
+              background: filterTag === t ? '#faad14' : 'rgba(255,255,255,0.05)',
+              color: filterTag === t ? '#000' : '#888',
+              border: `1px solid ${filterTag === t ? '#faad14' : 'rgba(255,255,255,0.1)'}`,
+            }}>{t}</button>
+          ))}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '1rem' }}>
+          {filtered.map(s => (
+            <div
+              key={s.id}
+              onClick={() => setSelected(selected === s.id ? null : s.id)}
+              style={{
+                padding: '1.25rem', borderRadius: '12px', cursor: 'pointer',
+                background: selected === s.id ? `${s.color}15` : 'rgba(255,255,255,0.03)',
+                border: `1px solid ${selected === s.id ? s.color : 'rgba(255,255,255,0.07)'}`,
+                borderLeft: `4px solid ${s.color}`,
+                transition: 'all 0.15s',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                <span style={{ fontSize: '1.5rem' }}>{s.emoji}</span>
+                <span style={{ fontSize: '0.6rem', padding: '2px 8px', borderRadius: '20px', background: `${s.color}22`, color: s.color, fontWeight: 'bold' }}>{s.tag}</span>
+              </div>
+              <div style={{ fontWeight: 'bold', fontSize: '0.9rem', marginBottom: '0.25rem' }}>{s.name}</div>
+              <div style={{ fontSize: '0.7rem', color: '#666', display: 'flex', gap: '0.75rem' }}>
+                <span>⏱ {s.timeframe}</span>
+                <span>🚀 {s.speed}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right: detail panel */}
+      {active && (
+        <div style={{ position: 'sticky', top: '1rem', padding: '1.5rem', borderRadius: '16px', background: 'rgba(255,255,255,0.03)', border: `1px solid ${active.color}44`, borderTop: `4px solid ${active.color}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <span style={{ fontSize: '2rem' }}>{active.emoji}</span>
+              <div>
+                <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>{active.name}</div>
+                <span style={{ fontSize: '0.65rem', padding: '2px 8px', borderRadius: '20px', background: `${active.color}22`, color: active.color, fontWeight: 'bold' }}>{active.tag}</span>
+              </div>
+            </div>
+            <button onClick={() => setSelected(null)} style={{ background: 'transparent', border: 'none', color: '#555', cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1rem' }}>
+            {[
+              { label: 'Timeframe', value: active.timeframe },
+              { label: 'ความเร็ว', value: active.speed },
+            ].map(item => (
+              <div key={item.label} style={{ background: 'rgba(0,0,0,0.3)', padding: '0.6rem', borderRadius: '8px', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.6rem', color: '#555', marginBottom: '0.2rem', textTransform: 'uppercase' }}>{item.label}</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 'bold', color: active.color }}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.65rem', color: '#555', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 'bold' }}>Indicators</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+              {active.indicators.map(ind => (
+                <span key={ind} style={{ fontSize: '0.7rem', padding: '3px 10px', borderRadius: '20px', background: 'rgba(255,255,255,0.06)', color: '#ccc', border: '1px solid rgba(255,255,255,0.1)' }}>{ind}</span>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: '1rem', background: 'rgba(0,0,0,0.3)', padding: '0.75rem', borderRadius: '8px', borderLeft: `3px solid ${active.color}` }}>
+            <div style={{ fontSize: '0.65rem', color: '#555', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 'bold' }}>สัญญาณเข้า</div>
+            <div style={{ fontSize: '0.8rem', color: '#ccc', lineHeight: 1.5 }}>{active.signal}</div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginBottom: '1rem' }}>
+            <div>
+              <div style={{ fontSize: '0.65rem', color: '#0ecb81', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 'bold' }}>✅ ข้อดี</div>
+              {active.pros.map(p => <div key={p} style={{ fontSize: '0.75rem', color: '#aaa', marginBottom: '0.25rem' }}>• {p}</div>)}
+            </div>
+            <div>
+              <div style={{ fontSize: '0.65rem', color: '#f6465d', textTransform: 'uppercase', marginBottom: '0.4rem', fontWeight: 'bold' }}>⚠️ ข้อเสีย</div>
+              {active.cons.map(c => <div key={c} style={{ fontSize: '0.75rem', color: '#aaa', marginBottom: '0.25rem' }}>• {c}</div>)}
+            </div>
+          </div>
+
+          <div style={{ background: `${active.color}11`, padding: '0.75rem', borderRadius: '8px', border: `1px solid ${active.color}33` }}>
+            <div style={{ fontSize: '0.65rem', color: active.color, textTransform: 'uppercase', marginBottom: '0.3rem', fontWeight: 'bold' }}>🎯 เหมาะกับ</div>
+            <div style={{ fontSize: '0.8rem', color: '#ccc' }}>{active.bestFor}</div>
+          </div>
+
+          <div style={{ marginTop: '1rem', padding: '0.5rem 0.75rem', background: 'rgba(0,0,0,0.4)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '0.7rem', color: '#555' }}>
+            strategy key: <span style={{ color: active.color }}>{active.id}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab 5: Backtest Workflow ─────────────────────────────────────────────────
+function BacktestWorkflowTab() {
+  const [activeStep, setActiveStep] = useState<number | null>(null);
+
+  const steps = [
+    {
+      num: 1,
+      emoji: '⚙️',
+      title: 'ตั้งค่า Config',
+      color: '#00d1ff',
+      where: 'UI → Backtest.tsx',
+      summary: 'ผู้ใช้เลือก Symbol, Strategy, Timeframe, TP%, SL%, Leverage, Capital, วันที่',
+      detail: `ค่าทั้งหมดถูกเก็บใน React state และสร้างเป็น BacktestConfig object ก่อนส่ง request
+
+BacktestConfig = {
+  symbol, strategy, interval,
+  tpPercent, slPercent, leverage, capital,
+  startDate?, endDate?
+}
+
+ถ้าเปิด Python Mode → strategy จะถูก prefix ด้วย "PYTHON:" เช่น "PYTHON:bb_breakout"`,
+      usesLLM: false,
+    },
+    {
+      num: 2,
+      emoji: '📡',
+      title: 'ดึง Klines จาก Binance',
+      color: '#faad14',
+      where: 'Backtester.js → KlineFetcher.js → BinanceAdapter',
+      summary: 'Backend ดึง OHLCV candle data จาก Binance API สูงสุด 1,500 candles',
+      detail: `fetchKlines(exchange, symbol, interval, { startDate, endDate, maxKlines: 1500 })
+
+แต่ละ kline = [timestamp, open, high, low, close, volume]
+
+ถ้าได้ข้อมูลน้อยกว่า 50 candles → return error "Insufficient data"
+
+Klines ถูกใช้เป็น source of truth ตลอด simulation ไม่มีการดึงข้อมูลเพิ่มระหว่างทาง`,
+      usesLLM: false,
+    },
+    {
+      num: 3,
+      emoji: '🔁',
+      title: 'Simulation Loop',
+      color: '#a855f7',
+      where: 'Backtester.js',
+      summary: 'วนลูปทุก candle ตั้งแต่ index 50 เป็นต้นไป คำนวณ signal และจัดการ position',
+      detail: `for (i = 50; i < klines.length; i++) {
+  closesSlice = closes[0..i]  // ไม่มี look-ahead bias
+
+  signal = computeSignal(closesSlice, strategy)
+  // หรือ getPythonSignal() ถ้าเป็น Python mode
+
+  ถ้าไม่มี position:
+    signal === LONG/SHORT → เปิด position, บันทึก entryPrice, entryTime
+
+  ถ้ามี position อยู่:
+    คำนวณ pnlPct จาก entryPrice vs currPrice
+    ถ้า pnlPct >= tpPercent → TP (Take Profit)
+    ถ้า pnlPct <= -slPercent → SL (Stop Loss)
+    ถ้า signal เปลี่ยนทิศ → Signal Flipped
+    → ปิด position, บันทึก trade, อัปเดต capital
+
+  บันทึก equity curve ณ candle นี้ (รวม unrealized PnL)
+}`,
+      usesLLM: false,
+    },
+    {
+      num: 4,
+      emoji: '🧠',
+      title: 'Signal Computation',
+      color: '#0ecb81',
+      where: 'SignalEngine.js → Strategy files',
+      summary: 'คำนวณ signal LONG / SHORT / NONE จาก close prices ผ่าน strategy ที่เลือก',
+      detail: `JS Strategies (ไม่ใช้ LLM):
+  computeSignal(closes, strategy, config)
+  → ส่งต่อไปยัง STRATEGY_REGISTRY[strategy].compute()
+  → return 'LONG' | 'SHORT' | 'NONE'
+
+Python Strategies:
+  getPythonSignal(strategyKey, { closes, highs, lows, volumes })
+  → POST http://{strategyAiUrl}/strategy/analyze
+  → Python service คำนวณ signal + confidence score
+  → return { signal, confidence }
+
+URL ของ strategy-ai ดึงจาก global config (Settings หน้า Config)
+default: http://strategy-ai:8000 (Docker) หรือ http://localhost:8000 (local)`,
+      usesLLM: false,
+    },
+    {
+      num: 5,
+      emoji: '📊',
+      title: 'Confidence Score',
+      color: '#f6a609',
+      where: 'AnalyticsUtils.js (JS) / confidence_engine.py (Python)',
+      summary: 'คำนวณความมั่นใจของ signal 0.0–1.0 โดยใช้ rule-based indicators',
+      detail: `JS Strategies → computeSignalConfidence(signal, closes):
+  ใช้ RSI(14), EMA20/50 cross, Momentum(10)
+  score เริ่มที่ 0.5 แล้วปรับตาม:
+    RSI oversold/overbought → ±0.15
+    EMA cross ตรงทิศ → +0.10
+    Momentum → +0.05
+
+Python Strategies → confidence_engine.py:
+  mode = "ml" (default) → rule-based เท่านั้น ไม่ใช้ LLM
+  mode = "full" → ถ้า confidence อยู่ใน 0.50–0.70 (gray zone)
+                   และมี OPENROUTER_API_KEY
+                   → เรียก LLM (OpenRouter) มาช่วยตัดสินใจ
+
+⚠️ LLM ถูกเรียกเฉพาะ mode=full + gray zone เท่านั้น`,
+      usesLLM: true,
+    },
+    {
+      num: 6,
+      emoji: '📈',
+      title: 'Equity Curve',
+      color: '#00d1ff',
+      where: 'Backtester.js (per-candle)',
+      summary: 'สร้าง equity curve ทุก candle รวม unrealized PnL ระหว่างถือ position',
+      detail: `ทุก candle จะบันทึก:
+  equity = currentCapital + unrealizedPnl
+
+unrealizedPnl คำนวณจาก:
+  LONG: (currPrice - entryPrice) / entryPrice × positionSize
+  SHORT: (entryPrice - currPrice) / entryPrice × positionSize
+
+ทำให้ equity curve สอดคล้องกับ trade markers บน chart
+(ไม่ใช่แค่จุดที่ปิด trade เหมือนเดิม)`,
+      usesLLM: false,
+    },
+    {
+      num: 7,
+      emoji: '🧮',
+      title: 'คำนวณ Metrics',
+      color: '#a855f7',
+      where: 'Backtester.js + AnalyticsUtils.js',
+      summary: 'คำนวณ performance metrics ทั้งหมดจาก trades และ equity curve',
+      detail: `Metrics ที่คำนวณ:
+  totalPnl = finalCapital - initialCapital
+  netPnlPct = totalPnl / capital × 100
+  winRate = winningTrades / totalTrades × 100
+  sharpeRatio = mean(pnl) / std(pnl) × √365
+  maxDrawdown = max((peak - value) / peak) ← จาก equity curve
+  profitFactor = sumProfit / sumLoss
+  avgWin / avgLoss = เฉลี่ย PnL ของ winning/losing trades
+  maxConsecutiveLosses = streak ยาวสุดของ losing trades
+
+Fee: 0.04% per side (taker fee) × 2 = 0.08% per trade`,
+      usesLLM: false,
+    },
+    {
+      num: 8,
+      emoji: '💾',
+      title: 'บันทึกผลและ Return',
+      color: '#0ecb81',
+      where: 'backtestRepository.js → SQLite',
+      summary: 'บันทึกผล backtest ลง SQLite และส่ง BacktestResult กลับไปยัง UI',
+      detail: `saveBacktestResult(result) → เก็บลง SQLite
+
+BacktestResult ที่ส่งกลับ:
+  backtestId, symbol, strategy, interval, config
+  initialCapital, finalCapital
+  totalPnl, netPnlPct, totalTrades, winRate
+  sharpeRatio, maxDrawdown, profitFactor
+  avgWin, avgLoss, maxConsecutiveLosses
+  equityCurve: [{ time, value }] ← ทุก candle
+  trades: [{ entryTime, exitTime, type, entryPrice, exitPrice,
+             pnl, pnlPct, entryReason, entryConfidence, exitReason }]
+  createdAt
+
+UI รับ response → render chart, markers, metrics, trade log`,
+      usesLLM: false,
+    },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      {/* Header */}
+      <div style={{ textAlign: 'center', padding: '2rem', background: 'radial-gradient(circle at center, rgba(0,209,255,0.06) 0%, transparent 70%)', borderRadius: '16px' }}>
+        <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🧪</div>
+        <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.8rem', fontWeight: 800 }}>Backtest Workflow</h2>
+        <p style={{ color: '#666', margin: 0, fontSize: '0.9rem' }}>ขั้นตอนการทำงานของระบบ Backtest ตั้งแต่ต้นจนจบ</p>
+      </div>
+
+      {/* LLM note */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', background: 'rgba(246,166,9,0.08)', border: '1px solid rgba(246,166,9,0.25)', borderRadius: '8px', fontSize: '0.82rem', color: '#f6a609' }}>
+        <span style={{ fontSize: '1.2rem' }}>⚡</span>
+        <span><strong>LLM ถูกเรียกเฉพาะ</strong> Python Strategy + mode=<code style={{ background: 'rgba(0,0,0,0.3)', padding: '1px 6px', borderRadius: '4px' }}>full</code> + confidence อยู่ใน gray zone 50–70% เท่านั้น — JS strategies ไม่ใช้ LLM เลย</span>
+      </div>
+
+      {/* Steps */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        {steps.map((step, idx) => (
+          <div key={step.num}>
+            {/* Connector line */}
+            {idx > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'center', height: '20px', alignItems: 'center' }}>
+                <div style={{ width: '2px', height: '100%', background: 'rgba(255,255,255,0.08)' }} />
+              </div>
+            )}
+            <div
+              onClick={() => setActiveStep(activeStep === step.num ? null : step.num)}
+              style={{
+                padding: '1rem 1.25rem', borderRadius: '12px', cursor: 'pointer',
+                background: activeStep === step.num ? `${step.color}10` : 'rgba(255,255,255,0.03)',
+                border: `1px solid ${activeStep === step.num ? step.color + '55' : 'rgba(255,255,255,0.07)'}`,
+                borderLeft: `4px solid ${step.color}`,
+                transition: 'all 0.15s',
+              }}
+            >
+              {/* Header row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: `${step.color}22`, border: `2px solid ${step.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 'bold', color: step.color, flexShrink: 0 }}>
+                  {step.num}
+                </div>
+                <span style={{ fontSize: '1.3rem' }}>{step.emoji}</span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>{step.title}</span>
+                    {step.usesLLM && (
+                      <span style={{ fontSize: '0.6rem', padding: '2px 8px', borderRadius: '20px', background: 'rgba(246,166,9,0.15)', color: '#f6a609', border: '1px solid rgba(246,166,9,0.3)', fontWeight: 'bold' }}>⚡ อาจใช้ LLM</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: '#555', marginTop: '0.1rem' }}>{step.where}</div>
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#555', maxWidth: '300px', textAlign: 'right', display: 'none' }}>{step.summary}</div>
+                <span style={{ color: '#444', fontSize: '0.8rem', flexShrink: 0 }}>{activeStep === step.num ? '▲' : '▼'}</span>
+              </div>
+
+              {/* Summary always visible */}
+              <div style={{ marginTop: '0.5rem', marginLeft: '4rem', fontSize: '0.82rem', color: '#888' }}>{step.summary}</div>
+
+              {/* Detail expanded */}
+              {activeStep === step.num && (
+                <div style={{ marginTop: '1rem', marginLeft: '4rem', padding: '1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '8px', borderLeft: `3px solid ${step.color}` }}>
+                  <pre style={{ margin: 0, fontFamily: 'monospace', fontSize: '0.78rem', color: '#ccc', whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{step.detail}</pre>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Summary table */}
+      <div style={{ padding: '1.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.07)' }}>
+        <h4 style={{ margin: '0 0 1rem 0', color: '#888', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '1px' }}>สรุป — เมื่อไหร่ใช้ LLM</h4>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+          {[
+            { label: 'JS Strategy (EMA, RSI, BB ฯลฯ)', llm: false, note: 'Rule-based เท่านั้น ไม่มี LLM เลย' },
+            { label: 'Python Strategy + mode=ml', llm: false, note: 'Rule-based confidence ใน Python service' },
+            { label: 'Python Strategy + mode=full + confidence < 50% หรือ > 70%', llm: false, note: 'Signal ชัดเจน ไม่ต้องถาม LLM' },
+            { label: 'Python Strategy + mode=full + confidence 50–70%', llm: true, note: 'Gray zone → เรียก OpenRouter LLM' },
+          ].map((row, i) => (
+            <div key={i} style={{ display: 'flex', gap: '0.75rem', padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: '8px', alignItems: 'flex-start' }}>
+              <span style={{ fontSize: '1rem', flexShrink: 0 }}>{row.llm ? '⚡' : '✅'}</span>
+              <div>
+                <div style={{ fontSize: '0.78rem', fontWeight: 'bold', color: row.llm ? '#f6a609' : '#0ecb81', marginBottom: '0.2rem' }}>{row.label}</div>
+                <div style={{ fontSize: '0.72rem', color: '#555' }}>{row.note}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

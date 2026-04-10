@@ -42,6 +42,7 @@ export default function BinanceLive() {
   // Form Temp State (for modals)
   const [currentAiType, setCurrentAiType] = useState<'confident' | 'grid' | 'scout'>('confident');
   const [sidebarMode, setSidebarMode] = useState<'full' | 'mini' | 'none'>('full');
+  const [showMobilePanel, setShowMobilePanel] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>([]);
 
   const toggleGroup = (groupName: string) => {
@@ -118,12 +119,22 @@ export default function BinanceLive() {
       return;
     }
     
-    const texts = {
+    const STRATEGY_LABELS: Record<string, string> = {
+      'EMA_SCALP':  '⚡ EMA Scalp (3/8)',
+      'STOCH_RSI':  '🎯 Stochastic RSI',
+      'VWAP_SCALP': '📊 VWAP Scalp',
+      'AI_SCOUTER': '🏹 Trend Scout',
+      'AI_GRID_SCALP': '⚡ Grid Scalp',
+      'AI_GRID_SWING': '🏛️ Grid Swing',
+    };
+    const stratLabel = STRATEGY_LABELS[strategy] || strategy;
+
+    const texts: Record<string, string> = {
       confident: `🧠 AI Precision: Analyzing ${symbol} market structure...`,
-      grid: strategy === 'AI_GRID_SCALP' 
-        ? `⚡ AI Grid (Scalp): Finding the fastest micro-ranges for ${symbol}...` 
+      grid: strategy === 'AI_GRID_SCALP'
+        ? `⚡ AI Grid (Scalp): Finding the fastest micro-ranges for ${symbol}...`
         : `🏛️ AI Grid (Swing): Mapping strong mid-term boundaries for ${symbol}...`,
-      scout: `🏹 Trend Scout: Scanning 1h/15m momentum for ${symbol}...`
+      scout: `${stratLabel}: Scanning momentum for ${symbol}...`
     };
     setThinkingText(texts[mode] || 'AI is thinking...');
     setShowThinkingModal(true);
@@ -329,7 +340,7 @@ export default function BinanceLive() {
   return (
     <div style={{ display: 'flex', gap: sidebarMode === 'none' ? '0' : '1rem', height: '100%', overflow: 'hidden', position: 'relative' }}>
       
-      {/* 3-Stage Toggle Button */}
+      {/* 3-Stage Toggle Button — desktop only */}
       <button 
         onClick={() => {
            if (sidebarMode === 'full') setSidebarMode('mini');
@@ -337,9 +348,10 @@ export default function BinanceLive() {
            else setSidebarMode('full');
         }}
         title={sidebarMode === 'full' ? 'Mini View' : sidebarMode === 'mini' ? 'Hide All' : 'Show Full'}
+        className="sidebar-toggle-btn"
         style={{
           position: 'absolute',
-          left: sidebarMode === 'full' ? '185px' : sidebarMode === 'mini' ? '55px' : '5px',
+          left: sidebarMode === 'full' ? '218px' : sidebarMode === 'mini' ? '44px' : '5px',
           top: '10px',
           zIndex: 1000,
           background: '#faad14',
@@ -360,8 +372,9 @@ export default function BinanceLive() {
         {sidebarMode === 'full' ? '«' : (sidebarMode === 'mini' ? '»' : '⚡')}
       </button>
 
-      <div style={{ 
-        width: sidebarMode === 'full' ? '200px' : (sidebarMode === 'mini' ? '70px' : '0'), 
+      {/* Desktop sidebar */}
+      <div className="sidebar-desktop" style={{ 
+        width: sidebarMode === 'full' ? '240px' : (sidebarMode === 'mini' ? '56px' : '0'), 
         overflow: 'hidden', 
         transition: 'width 0.3s ease',
         flexShrink: 0 
@@ -376,6 +389,52 @@ export default function BinanceLive() {
           isMini={sidebarMode === 'mini'}
         />
       </div>
+
+      {/* Mobile FAB */}
+      <button
+        className="sidebar-fab"
+        onClick={() => setShowMobilePanel(true)}
+        style={{
+          display: 'none', // shown via CSS media query
+          position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 1100,
+          width: '52px', height: '52px', borderRadius: '50%',
+          background: 'linear-gradient(135deg,#faad14,#ffc53d)',
+          color: '#000', border: 'none', fontSize: '1.4rem',
+          boxShadow: '0 4px 20px rgba(250,173,20,0.4)', cursor: 'pointer',
+        }}
+      >🚀</button>
+
+      {/* Mobile bottom sheet */}
+      {showMobilePanel && (
+        <div className="sidebar-sheet-overlay" onClick={() => setShowMobilePanel(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 1200 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0,
+              maxHeight: '90vh', borderRadius: '16px 16px 0 0',
+              background: '#0d0d1a', overflow: 'hidden',
+              display: 'flex', flexDirection: 'column',
+            }}>
+            {/* drag handle */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.75rem 1rem', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+              <span style={{ fontSize: '0.8rem', color: '#faad14', fontWeight: 'bold' }}>🎯 MANUAL ENTRY</span>
+              <button onClick={() => setShowMobilePanel(false)}
+                style={{ background: 'transparent', border: 'none', color: '#666', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              <BotSidebar
+                binanceKeys={binanceKeys}
+                onStart={async (cfg) => { await handleStart(cfg); setShowMobilePanel(false); }}
+                onAIRecommend={async (...args) => { await handleAIRecommend(...args); setShowMobilePanel(false); }}
+                loading={loading}
+                positionSizeUSDT={positionSizeUSDT}
+                setPositionSizeUSDT={setPositionSizeUSDT}
+                isMobile
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ 
         flex: 1, 

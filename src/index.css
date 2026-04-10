@@ -148,3 +148,17 @@ p {
 @media (max-width: 640px) {
   .grid-cols-2, .grid-cols-3, .grid-cols-4 { grid-template-columns: 1fr; }
 }
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── BinanceLive Responsive ─────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar-desktop { display: none !important; }
+  .sidebar-toggle-btn { display: none !important; }
+  .sidebar-fab { display: flex !important; align-items: center; justify-content: center; }
+}
+@media (min-width: 769px) {
+  .sidebar-fab { display: none !important; }
+}

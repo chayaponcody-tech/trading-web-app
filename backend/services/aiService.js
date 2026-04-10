@@ -55,19 +55,44 @@ export async function callOpenRouter(prompt, apiKey, model = 'google/gemini-2.0-
     });
 }
 
-export async function getBotRecommendations(context, count, aiType, apiKey, model, symbol) {
-    let promptDesc = "BEST for 5m Scalping (AI_SCOUTER)";
-    let expectedStrategy = "AI_SCOUTER";
-    let expectedInterval = "5m";
-    
-    if (aiType === 'confident') {
-        promptDesc = "BEST for 15m Trend following / High Winrate (EMA_RSI)";
-        expectedStrategy = "EMA_RSI";
-        expectedInterval = "15m";
-    } else if (aiType === 'grid') {
-        promptDesc = "BEST for 1h Grid Trading boundary mapping (GRID). Identify clear support and resistance levels for upper/lower grid bounds.";
-        expectedStrategy = "AI_GRID";
-        expectedInterval = "1h";
+export async function getBotRecommendations(context, count, aiType, apiKey, model, symbol, overrideStrategy) {
+    // Strategy labels for prompt descriptions
+    const STRATEGY_DESCS = {
+        'EMA_SCALP':  'EMA 3/8 Fast Cross Scalping (EMA_SCALP) — very fast entries on 1m-5m',
+        'STOCH_RSI':  'Stochastic RSI Micro-cycle Scalping (STOCH_RSI) — catches micro reversals on 5m',
+        'VWAP_SCALP': 'VWAP Retest + Momentum Scalping (VWAP_SCALP) — enters on VWAP retest with RSI confirm on 5m',
+        'AI_SCOUTER': '5m Scalping (AI_SCOUTER) — SMA7/14 cross with RSI filter',
+        'EMA_RSI':    '15m Trend following / High Winrate (EMA_RSI)',
+        'AI_GRID':    '1h Grid Trading boundary mapping (AI_GRID)',
+        'AI_GRID_SCALP': '15m Fast Grid Scalping (AI_GRID_SCALP)',
+        'AI_GRID_SWING': '1h Grid Swing Trading (AI_GRID_SWING)',
+    };
+
+    let expectedStrategy = overrideStrategy || 'AI_SCOUTER';
+    let expectedInterval = '5m';
+    let promptDesc = STRATEGY_DESCS[expectedStrategy] || `Scalping (${expectedStrategy})`;
+
+    if (!overrideStrategy) {
+        if (aiType === 'confident') {
+            expectedStrategy = 'EMA_RSI';
+            expectedInterval = '15m';
+            promptDesc = STRATEGY_DESCS['EMA_RSI'];
+        } else if (aiType === 'grid') {
+            expectedStrategy = 'AI_GRID';
+            expectedInterval = '1h';
+            promptDesc = STRATEGY_DESCS['AI_GRID'];
+        }
+    } else {
+        // Set appropriate interval per strategy
+        if (['EMA_SCALP', 'STOCH_RSI', 'VWAP_SCALP', 'AI_SCOUTER'].includes(overrideStrategy)) {
+            expectedInterval = '5m';
+        } else if (['AI_GRID_SCALP'].includes(overrideStrategy)) {
+            expectedInterval = '15m';
+        } else if (['AI_GRID_SWING', 'AI_GRID'].includes(overrideStrategy)) {
+            expectedInterval = '1h';
+        } else if (['EMA_RSI', 'EMA_BB_RSI'].includes(overrideStrategy)) {
+            expectedInterval = '15m';
+        }
     }
 
     const prompt = `You are a QUANT SCANNER. Review these top performers on Binance:
@@ -96,10 +121,11 @@ export async function getBotRecommendations(context, count, aiType, apiKey, mode
         console.log(`[AI Recommend] Raw Response for ${symbol}:`, JSON.stringify(raw));
 
         // Robust parsing and defaults
+        // Force strategy/interval to match what was requested — AI must not override these
         const result = {
             symbol: raw.symbol || symbol || 'BTCUSDT',
-            strategy: raw.strategy || expectedStrategy,
-            interval: raw.interval || expectedInterval,
+            strategy: expectedStrategy,
+            interval: expectedInterval,
             tp: parseFloat(raw.tp) || 1.5,
             sl: parseFloat(raw.sl) || 0.5,
             leverage: parseInt(raw.leverage) || 10,

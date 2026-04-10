@@ -58,8 +58,8 @@ Ensure entry_steps weightPct total = 100. OffsetPct for Longs is negative, Short
   const raw = await callOpenRouter(prompt, apiKey, model);
   return {
     symbol:               raw.symbol || symbol,
-    strategy:             raw.strategy || type.strategy,
-    interval:             raw.interval || type.interval,
+    strategy:             type.strategy,   // force — AI must not override requested strategy
+    interval:             type.interval,   // force — AI must not override requested interval
     tp:                   parseFloat(raw.tp) || 1.5,
     sl:                   parseFloat(raw.sl) || 1.0,
     leverage:             parseInt(raw.leverage) || 5,

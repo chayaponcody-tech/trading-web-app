@@ -20,6 +20,7 @@ import { createBinanceRoutes }   from './routes/binanceRoutes.js';
 import { createConfigRoutes }    from './routes/configRoutes.js';
 import { createPortfolioRoutes } from './routes/portfolioRoutes.js';
 import { createWalletRoutes }    from './routes/walletRoutes.js';
+import { createBacktestRoutes }  from './routes/backtestRoutes.js';
 import { errorHandler }          from './middleware/errorHandler.js';
 
 import { setupSwagger }          from './swagger.js';
@@ -99,26 +100,11 @@ app.use('/api/binance',   createBinanceRoutes(botManager, Array.from(portfolioMa
 app.use('/api/config',    createConfigRoutes(botManager, portfolioManagers));
 app.use('/api/portfolio', createPortfolioRoutes(portfolioManagers, { botManager, exchange }));
 app.use('/api/wallet',    createWalletRoutes());
+app.use('/api/backtest', createBacktestRoutes(exchange));
 
 
 // Backwards-compat aliases (legacy frontend calls these paths)
 app.use('/api/forward-test', createBotRoutes(botManager));
-
-// Proxy Binance public klines for backtest (no auth needed)
-app.get('/api/backtest', async (req, res, next) => {
-  try {
-    const https = await import('https');
-    const { symbol = 'BTCUSDT', interval = '1h', limit = 1000, startTime, endTime } = req.query;
-    let url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-    if (startTime) url += `&startTime=${startTime}`;
-    if (endTime)   url += `&endTime=${endTime}`;
-    https.get(url, (apiRes) => {
-      let data = '';
-      apiRes.on('data', (c) => (data += c));
-      apiRes.on('end', () => res.json(JSON.parse(data)));
-    }).on('error', next);
-  } catch (e) { next(e); }
-});
 
 // ─── Phase 1.5: Python Strategy Bridge ────────────────────────────────────────
 // This endpoint is called by the 'strategy-ai' container (Python)

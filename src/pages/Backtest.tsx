@@ -1,43 +1,21 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createChart, ColorType, LineSeries, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
 import type { IChartApi, ISeriesApi, Time, SeriesMarker, ISeriesMarkersPluginApi } from 'lightweight-charts';
-import { EMA, BollingerBands, RSI } from 'technicalindicators';
 import SymbolSelector from '../components/SymbolSelector';
+import type { Trade, BacktestResult, BacktestConfig, BacktestSummary, CompareResult } from '../utils/backtestUtils';
+import { convertEquityCurve, buildMarkersFromTrades, sortTradesDescending, buildCompareRequestBody } from '../utils/backtestUtils';
 
-interface BacktestTrade {
-  entryTime: string;
-  exitTime: string;
-  type: string;
-  entryPrice: number;
-  exitPrice: number;
-  pnl: number;
-  reason: string;
-  maxFloatingLoss?: number;
-}
 
-interface OpenPosition {
-  type: string;
-  entryPrice: number;
-  currentPrice: number;
-  unrealizedPnl: number;
-  size?: number;
-}
-
-interface BacktestResults {
-  netPnl: number;
-  netPnlPct: number;
-  worstFloatingLoss: number;
-  winRate: number;
-  winCount: number;
-  lossCount: number;
-  maxDrawdown: number;
-  profitFactor: number;
-  totalTrades: number;
-  openPositions: OpenPosition[];
+/**
+ * Returns true if the Leverage input should be visible for the given strategy.
+ * Leverage is hidden only for GRID strategy.
+ */
+export function isLeverageVisible(strategy: string): boolean {
+  return strategy !== 'GRID';
 }
 
 export default function Backtest() {
-  const [symbol, setSymbol] = useState('BTCUSDT'); 
+  const [symbol, setSymbol] = useState('BTCUSDT');
   const [interval, setIntervalTime] = useState('1h');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -58,39 +36,33 @@ export default function Backtest() {
     }
   }, [symbol]);
 
+  const [leverage, setLeverage] = useState(10);
+  const [isPythonMode, setIsPythonMode] = useState(false);
+  const [pythonStrategyName, setPythonStrategyName] = useState('');
+  const [compareMode, setCompareMode] = useState(false);
+  const [compareConfigs, setCompareConfigs] = useState<BacktestConfig[]>([]);
+  const [compareResults, setCompareResults] = useState<CompareResult[]>([]);
+  const [historyList, setHistoryList] = useState<BacktestSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
   const [isRunning, setIsRunning] = useState(false);
-  const [results, setResults] = useState<BacktestResults | null>(null);
-  const [tradeLog, setTradeLog] = useState<BacktestTrade[]>([]);
-  const [activeTab, setActiveTab] = useState<'charts' | 'log'>('charts');
+  const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'charts' | 'log' | 'history' | 'compare'>('charts');
   const [showMarkers, setShowMarkers] = useState(true);
   const [storedMarkers, setStoredMarkers] = useState<SeriesMarker<Time>[]>([]);
-  const [hoverData, setHoverData] = useState<{ unrealized: number; equity: number } | null>(null);
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const equitySeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const equitySeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
 
   const candleChartContainerRef = useRef<HTMLDivElement>(null);
   const candleChartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  
+  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+
   // The official markers plugin instance
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
-
-  const ema20SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const ema50SeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const bbUpperSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const bbLowerSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const bbMidSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-
-  // RSI chart (separate panel since RSI is 0-100 scale)
-  const rsiChartContainerRef = useRef<HTMLDivElement>(null);
-  const rsiChartRef = useRef<IChartApi | null>(null);
-  const rsiSeriesRef = useRef<ISeriesApi<"Line"> | null>(null);
-  const rsi30Ref = useRef<ISeriesApi<"Line"> | null>(null);
-  const rsi70Ref = useRef<ISeriesApi<"Line"> | null>(null);
-
-  const equityDataMapRef = useRef<Map<number, { unrealized: number; equity: number }>>(new Map());
 
   // Apply or remove markers using the plugin
   const applyMarkers = useCallback((markers: SeriesMarker<Time>[], visible: boolean) => {
@@ -146,159 +118,24 @@ export default function Backtest() {
       candleSeriesRef.current = cChart.addSeries(CandlestickSeries, {
         upColor: '#0ecb81', downColor: '#f6465d', borderVisible: false, wickUpColor: '#0ecb81', wickDownColor: '#f6465d'
       });
-      
-      ema20SeriesRef.current = cChart.addSeries(LineSeries, { color: '#2962FF', lineWidth: 1, title: 'EMA 20' });
-      ema50SeriesRef.current = cChart.addSeries(LineSeries, { color: '#FF6D00', lineWidth: 1, title: 'EMA 50' });
-      bbUpperSeriesRef.current = cChart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.5)', lineWidth: 1, title: 'BB U' });
-      bbLowerSeriesRef.current = cChart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.5)', lineWidth: 1, title: 'BB L' });
-      bbMidSeriesRef.current = cChart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.2)', lineWidth: 1, title: 'BB M' });
 
       let isCrossUpdating = false;
-      const sync = (logicalRange: any, target: IChartApi) => {
-          if (!isCrossUpdating && logicalRange) {
-              isCrossUpdating = true;
-              target.timeScale().setVisibleLogicalRange(logicalRange);
-              isCrossUpdating = false;
-          }
+      const syncByTime = (chart1: IChartApi, chart2: IChartApi) => {
+        chart1.timeScale().subscribeVisibleTimeRangeChange((range) => {
+          if (isCrossUpdating || !range) return;
+          isCrossUpdating = true;
+          try { chart2.timeScale().setVisibleRange(range); } catch { /* ignore if target has no data */ }
+          isCrossUpdating = false;
+        });
       };
-      chart.timeScale().subscribeVisibleLogicalRangeChange((lr) => sync(lr, cChart));
-      cChart.timeScale().subscribeVisibleLogicalRangeChange((lr) => sync(lr, chart));
-
-      cChart.subscribeCrosshairMove((param) => {
-          if (param.time) {
-              const d = equityDataMapRef.current.get(param.time as number);
-              setHoverData(d ?? null);
-          } else setHoverData(null);
-      });
+      syncByTime(chart, cChart);
+      syncByTime(cChart, chart);
     }
 
-    // RSI chart (separate oscillator panel)
-    if (rsiChartContainerRef.current) {
-      const rChart = createChart(rsiChartContainerRef.current, {
-        layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#848e9c' },
-        grid: { vertLines: { color: '#2b313f' }, horzLines: { color: '#2b313f' } },
-        timeScale: { timeVisible: true, secondsVisible: false },
-        rightPriceScale: { autoScale: false, scaleMargins: { top: 0.05, bottom: 0.05 } },
-        autoSize: true,
-      });
-      rsiChartRef.current = rChart;
-      rsiSeriesRef.current = rChart.addSeries(LineSeries, { color: '#ab47bc', lineWidth: 2, title: 'RSI 14', priceScaleId: 'right' });
-      rsi30Ref.current = rChart.addSeries(LineSeries, { color: 'rgba(14,203,129,0.3)', lineWidth: 1, lineStyle: 2, priceScaleId: 'right' });
-      rsi70Ref.current = rChart.addSeries(LineSeries, { color: 'rgba(246,70,93,0.3)', lineWidth: 1, lineStyle: 2, priceScaleId: 'right' });
-      rChart.priceScale('right').applyOptions({ autoScale: false, scaleMargins: { top: 0.05, bottom: 0.05 } });
-
-      // Sync RSI chart with candle chart
-      if (candleChartRef.current) {
-        let isCross2 = false;
-        const sync2 = (lr: any, t: IChartApi) => { if (!isCross2 && lr) { isCross2 = true; t.timeScale().setVisibleLogicalRange(lr); isCross2 = false; } };
-        candleChartRef.current.timeScale().subscribeVisibleLogicalRangeChange((lr) => sync2(lr, rChart));
-        rChart.timeScale().subscribeVisibleLogicalRangeChange((lr) => { if (candleChartRef.current) sync2(lr, candleChartRef.current); });
-      }
-    }
-
-    return () => { chart.remove(); candleChartRef.current?.remove(); rsiChartRef.current?.remove(); markersPluginRef.current = null; }
+    return () => { chart.remove(); candleChartRef.current?.remove(); markersPluginRef.current = null; };
   }, []);
 
-  const calculateAndDrawIndicators = useCallback((cdata: any[], currentStrategy: string) => {
-    const closePrices = cdata.map((d) => d.close);
-    const signals: string[] = new Array(cdata.length).fill('NONE');
-
-    // Reset all indicator series
-    ema20SeriesRef.current?.setData([]);
-    ema50SeriesRef.current?.setData([]);
-    bbUpperSeriesRef.current?.setData([]);
-    bbLowerSeriesRef.current?.setData([]);
-    bbMidSeriesRef.current?.setData([]);
-    rsiSeriesRef.current?.setData([]);
-    rsi30Ref.current?.setData([]);
-    rsi70Ref.current?.setData([]);
-
-    if (currentStrategy === 'EMA') {
-      const d20 = EMA.calculate({ period: 20, values: closePrices });
-      const d50 = EMA.calculate({ period: 50, values: closePrices });
-      const o20 = cdata.length - d20.length;
-      const o50 = cdata.length - d50.length;
-      ema20SeriesRef.current?.setData(d20.map((v, idx) => ({ time: cdata[idx + o20].time, value: v })));
-      ema50SeriesRef.current?.setData(d50.map((v, idx) => ({ time: cdata[idx + o50].time, value: v })));
-      const warmup = Math.max(o20, o50) + 10;
-      for (let i = warmup + 1; i < cdata.length; i++) {
-        if (d20[i-1-o20] <= d50[i-1-o50] && d20[i-o20] > d50[i-o50]) signals[i] = 'LONG';
-        else if (d20[i-1-o20] >= d50[i-1-o50] && d20[i-o20] < d50[i-o50]) signals[i] = 'SHORT';
-      }
-    } else if (currentStrategy === 'BB') {
-      const bb = BollingerBands.calculate({ period: 20, stdDev: 2, values: closePrices });
-      const offset = cdata.length - bb.length;
-      bbUpperSeriesRef.current?.setData(bb.map((v, idx) => ({ time: cdata[idx + offset].time, value: v.upper })));
-      bbLowerSeriesRef.current?.setData(bb.map((v, idx) => ({ time: cdata[idx + offset].time, value: v.lower })));
-      bbMidSeriesRef.current?.setData(bb.map((v, idx) => ({ time: cdata[idx + offset].time, value: v.middle })));
-      for (let i = offset + 5; i < cdata.length; i++) {
-        if (closePrices[i-1] <= bb[i-1-offset].lower && closePrices[i] > bb[i-offset].lower) signals[i] = 'LONG';
-        else if (closePrices[i-1] >= bb[i-1-offset].upper && closePrices[i] < bb[i-offset].upper) signals[i] = 'SHORT';
-      }
-    } else if (currentStrategy === 'RSI') {
-      const rsiValues = RSI.calculate({ period: 14, values: closePrices });
-      const rsiOffset = cdata.length - rsiValues.length;
-      const rsiLine = rsiValues.map((v, idx) => ({ time: cdata[idx + rsiOffset].time, value: v }));
-      rsiSeriesRef.current?.setData(rsiLine);
-      rsi30Ref.current?.setData(rsiLine.map(p => ({ time: p.time, value: 30 })));
-      rsi70Ref.current?.setData(rsiLine.map(p => ({ time: p.time, value: 70 })));
-      rsiChartRef.current?.timeScale().fitContent();
-      for (let i = rsiOffset + 5; i < cdata.length; i++) {
-        if (rsiValues[i-1-rsiOffset] <= 30 && rsiValues[i-rsiOffset] > 30) signals[i] = 'LONG';
-        else if (rsiValues[i-1-rsiOffset] >= 70 && rsiValues[i-rsiOffset] < 70) signals[i] = 'SHORT';
-      }
-    } else if (['EMA_RSI', 'BB_RSI', 'EMA_BB_RSI'].includes(currentStrategy)) {
-      const d20 = EMA.calculate({ period: 20, values: closePrices });
-      const d50 = EMA.calculate({ period: 50, values: closePrices });
-      const o20 = cdata.length - d20.length;
-      const o50 = cdata.length - d50.length;
-      const bb = BollingerBands.calculate({ period: 20, stdDev: 2, values: closePrices });
-      const bbOff = cdata.length - bb.length;
-      const rsiValues = RSI.calculate({ period: 14, values: closePrices });
-      const rsiOff = cdata.length - rsiValues.length;
-
-      if (currentStrategy.includes('EMA')) {
-        ema20SeriesRef.current?.setData(d20.map((v, idx) => ({ time: cdata[idx + o20].time, value: v })));
-        ema50SeriesRef.current?.setData(d50.map((v, idx) => ({ time: cdata[idx + o50].time, value: v })));
-      }
-      if (currentStrategy.includes('BB')) {
-        bbUpperSeriesRef.current?.setData(bb.map((v, idx) => ({ time: cdata[idx + bbOff].time, value: v.upper })));
-        bbLowerSeriesRef.current?.setData(bb.map((v, idx) => ({ time: cdata[idx + bbOff].time, value: v.lower })));
-        bbMidSeriesRef.current?.setData(bb.map((v, idx) => ({ time: cdata[idx + bbOff].time, value: v.middle })));
-      }
-      const rsiLine = rsiValues.map((v, idx) => ({ time: cdata[idx + rsiOff].time, value: v }));
-      rsiSeriesRef.current?.setData(rsiLine);
-      rsi30Ref.current?.setData(rsiLine.map(p => ({ time: p.time, value: 30 })));
-      rsi70Ref.current?.setData(rsiLine.map(p => ({ time: p.time, value: 70 })));
-      rsiChartRef.current?.timeScale().fitContent();
-
-      const start = Math.max(o20, o50, bbOff, rsiOff) + 10;
-      for (let i = start; i < cdata.length; i++) {
-        const rsi = rsiValues[i - rsiOff];
-        const prevRsi = rsiValues[i - 1 - rsiOff];
-        const emaCrossUp = d20[i-o20] > d50[i-o50] && d20[i-1-o20] <= d50[i-1-o50];
-        const emaCrossDown = d20[i-o20] < d50[i-o50] && d20[i-1-o20] >= d50[i-1-o50];
-        const emaBullish = d20[i-o20] > d50[i-o50];
-        const emaBearish = d20[i-o20] < d50[i-o50];
-        const bbBounceUp = closePrices[i-1] <= bb[i-1-bbOff].lower && closePrices[i] > bb[i-bbOff].lower;
-        const bbBounceDown = closePrices[i-1] >= bb[i-1-bbOff].upper && closePrices[i] < bb[i-bbOff].upper;
-        
-        if (currentStrategy === 'EMA_RSI') {
-          if (emaCrossUp && rsi < 40) signals[i] = 'LONG';
-          else if (emaCrossDown && rsi > 60) signals[i] = 'SHORT';
-        } else if (currentStrategy === 'BB_RSI') {
-          if (bbBounceUp && prevRsi <= 30) signals[i] = 'LONG';
-          else if (bbBounceDown && prevRsi >= 70) signals[i] = 'SHORT';
-        } else if (currentStrategy === 'EMA_BB_RSI') {
-          if (emaBullish && bbBounceUp && rsi < 40) signals[i] = 'LONG';
-          else if (emaBearish && bbBounceDown && rsi > 60) signals[i] = 'SHORT';
-        }
-      }
-    }
-    return signals;
-  }, []);
-
-  // Auto-preview on symbol/interval/strategy change
+  // Auto-preview on symbol/interval change
   useEffect(() => {
     const fetchPreview = async () => {
       try {
@@ -313,169 +150,158 @@ export default function Backtest() {
         }));
 
         candleSeriesRef.current?.setData(cdata);
-        calculateAndDrawIndicators(cdata, strategy);
-        
         candleChartRef.current?.timeScale().fitContent();
-        rsiChartRef.current?.timeScale().fitContent();
-        // Reset scale as well
         candleChartRef.current?.priceScale('right').applyOptions({ autoScale: true });
-        rsiChartRef.current?.priceScale('right').applyOptions({ autoScale: true });
       } catch (err) { console.error('Preview error:', err); }
     };
 
     if (candleSeriesRef.current && !isRunning) {
       fetchPreview();
     }
-  }, [symbol, interval, strategy, calculateAndDrawIndicators, isRunning]);
+  }, [symbol, interval, isRunning]);
+
+  const loadHistory = async () => {
+    if (historyLoading) return;
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const res = await fetch('/api/backtest/history');
+      if (!res.ok) throw new Error('Failed to load history');
+      const data = await res.json();
+      setHistoryList(data);
+    } catch (e) {
+      setHistoryError('Failed to load backtest history');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const loadHistoryItem = async (backtestId: string) => {
+    try {
+      const res = await fetch(`/api/backtest/history/${backtestId}`);
+      if (!res.ok) throw new Error('Failed to load history item');
+      const result: BacktestResult = await res.json();
+      equitySeriesRef.current?.setData(convertEquityCurve(result.equityCurve));
+      const markers = buildMarkersFromTrades(result.trades);
+      setStoredMarkers(markers);
+      setBacktestResult(result);
+      setActiveTab('charts');
+    } catch (e) {
+      setErrorMessage('Failed to load history item');
+    }
+  };
+
+  const addCurrentConfig = () => {
+    if (compareConfigs.length >= 10) return;
+    const config: BacktestConfig = {
+      symbol,
+      strategy: isPythonMode ? `PYTHON:${pythonStrategyName}` : strategy,
+      interval,
+      tpPercent,
+      slPercent,
+      leverage,
+      capital,
+      ...(startDate ? { startDate } : {}),
+      ...(endDate ? { endDate } : {}),
+    };
+    setCompareConfigs(prev => [...prev, config]);
+  };
+
+  const handleRunCompare = async () => {
+    if (compareConfigs.length === 0) return;
+    setIsRunning(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/backtest/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildCompareRequestBody(compareConfigs)),
+      });
+      const body = await res.json();
+      if (!res.ok || body.error) {
+        setErrorMessage(body.error || 'Compare failed');
+        return;
+      }
+      setCompareResults(body);
+      setActiveTab('compare');
+    } catch (e) {
+      setErrorMessage('Network error — please check your connection');
+    } finally {
+      setIsRunning(false);
+    }
+  };
 
   const runBacktest = async () => {
-    setIsRunning(true);
-    setResults(null);
-    setTradeLog([]);
-    setActiveTab('charts');
-    equityDataMapRef.current.clear();
-    
-    // Clear markers immediately
-    if (markersPluginRef.current) {
-        markersPluginRef.current.setMarkers([]);
-    }
-    setStoredMarkers([]);
+    const config: BacktestConfig = {
+      symbol,
+      strategy: isPythonMode ? ('PYTHON:' + pythonStrategyName) : strategy,
+      interval,
+      tpPercent,
+      slPercent,
+      leverage,
+      capital,
+      ...(startDate ? { startDate } : {}),
+      ...(endDate ? { endDate } : {}),
+    };
 
-    ema20SeriesRef.current?.setData([]);
-    ema50SeriesRef.current?.setData([]);
-    bbUpperSeriesRef.current?.setData([]);
-    bbLowerSeriesRef.current?.setData([]);
-    bbMidSeriesRef.current?.setData([]);
-    rsiSeriesRef.current?.setData([]);
-    rsi30Ref.current?.setData([]);
-    rsi70Ref.current?.setData([]);
+    // Clear previous state before fetch
+    setBacktestResult(null);
+    setErrorMessage(null);
+    markersPluginRef.current?.setMarkers([]);
+    setStoredMarkers([]);
+    equitySeriesRef.current?.setData([]);
+
+    setIsRunning(true);
+    setActiveTab('charts');
 
     try {
-      const startMs = startDate ? new Date(startDate).getTime() : '';
-      const endMs = endDate ? new Date(endDate).getTime() : '';
-      const res = await fetch(`/api/backtest?symbol=${symbol}&interval=${interval}&limit=1000${startMs ? `&startTime=${startMs}` : ''}${endMs ? `&endTime=${endMs}` : ''}`);
-      const data = await res.json();
-      if (!Array.isArray(data)) throw new Error('Data fetch failed');
+      const res = await fetch('/api/backtest/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
 
-      const cdata = data.map((d: any) => ({
-        time: (Math.floor(d[0] / 1000)) as Time,
-        open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4])
-      }));
+      const body = await res.json();
 
-      // Calculate signals and render indicators
-      const signals = calculateAndDrawIndicators(cdata, strategy);
-
-
-      const tzOpts: Intl.DateTimeFormatOptions = { timeZone: 'Asia/Bangkok', dateStyle: 'short', timeStyle: 'short' };
-      const logs: BacktestTrade[] = [];
-      const markers: SeriesMarker<Time>[] = [];
-      const equityCurve: Array<{time: Time, value: number}> = [];
-      let finalResults: BacktestResults;
-
-      if (strategy === 'GRID') {
-         const step = (gridUpper - gridLower) / gridQuantity;
-         const sizePerGrid = capital / gridQuantity;
-         const grids: Array<{buyPrice: number, sellPrice: number, isBought: boolean}> = [];
-         for(let i=0; i<gridQuantity; i++) grids.push({ buyPrice: gridLower + step * i, sellPrice: gridLower + step * (i + 1), isBought: false });
-         
-         let currentCash = capital;
-         if (cdata.length > 0) grids.forEach(g => { if (g.buyPrice < cdata[0].open) { g.isBought = true; currentCash -= sizePerGrid; } });
-
-         let peakEquity = capital, maxDrawdown = 0, grossProfit = 0, worstFloating = 0;
-
-         for (let i = 0; i < cdata.length; i++) {
-            const candle = cdata[i];
-            grids.forEach(g => {
-               if (g.isBought && candle.high >= g.sellPrice) {
-                  g.isBought = false;
-                  const pnlVal = ((g.sellPrice - g.buyPrice) / g.buyPrice) * sizePerGrid;
-                  currentCash += sizePerGrid + pnlVal; grossProfit += pnlVal;
-                   logs.push({ entryTime: new Date((candle.time as number)*1000).toLocaleString('th-TH', tzOpts), exitTime: new Date((candle.time as number)*1000).toLocaleString('th-TH', tzOpts), type: 'GRID SELL', entryPrice: g.buyPrice, exitPrice: g.sellPrice, pnl: pnlVal, reason: 'Target' });
-                  markers.push({ time: candle.time, position: 'aboveBar', color: '#f6465d', shape: 'arrowDown', text: 'SELL' });
-               }
-               if (!g.isBought && candle.low <= g.buyPrice && currentCash >= sizePerGrid) {
-                  g.isBought = true; currentCash -= sizePerGrid;
-                  markers.push({ time: candle.time, position: 'belowBar', color: '#0ecb81', shape: 'arrowUp', text: 'BUY' });
-               }
-            });
-            let unrealized = 0;
-            grids.forEach(g => { if (g.isBought) unrealized += sizePerGrid * (candle.close / g.buyPrice) - sizePerGrid; });
-            if (unrealized < worstFloating) worstFloating = unrealized;
-            const eq = currentCash + grids.filter(g => g.isBought).length * sizePerGrid + unrealized;
-            if (eq > peakEquity) peakEquity = eq;
-            maxDrawdown = Math.max(maxDrawdown, ((peakEquity - eq) / peakEquity) * 100);
-            equityCurve.push({ time: candle.time, value: eq });
-            equityDataMapRef.current.set(candle.time as number, { unrealized, equity: eq });
-         }
-         const lastClose = cdata[cdata.length - 1]?.close ?? 0;
-         const openPos: OpenPosition[] = grids.filter(g => g.isBought).map(g => ({
-           type: 'GRID HOLD', entryPrice: g.buyPrice, currentPrice: lastClose,
-           unrealizedPnl: sizePerGrid * (lastClose / g.buyPrice) - sizePerGrid, size: sizePerGrid
-         }));
-         finalResults = { netPnl: equityCurve[equityCurve.length-1].value - capital, netPnlPct: ((equityCurve[equityCurve.length-1].value - capital) / capital) * 100, worstFloatingLoss: worstFloating, winRate: 100, winCount: logs.length, lossCount: 0, maxDrawdown, profitFactor: grossProfit, totalTrades: logs.length, openPositions: openPos };
-      } else {
-         let currentCash = capital, peakEquity = capital, maxDD = 0;
-         let pos = 'NONE', entryPriceValue = 0, entryTimeValue = 0;
-         let grossProfit = 0, grossLoss = 0, winCount = 0;
-         let worstFloatingLossTotal = 0, maxUnrealizedTradeLoss = 0;
-         
-         for (let i = 0; i < cdata.length; i++) {
-             const candle = cdata[i];
-             const signal = signals[i];
-             let unrealized = 0;
-             if (pos === 'LONG') unrealized = ((candle.close - entryPriceValue) / entryPriceValue) * currentCash;
-             else if (pos === 'SHORT') unrealized = ((entryPriceValue - candle.close) / entryPriceValue) * currentCash;
-             if (pos !== 'NONE' && unrealized < maxUnrealizedTradeLoss) maxUnrealizedTradeLoss = unrealized;
-              if (unrealized < worstFloatingLossTotal) worstFloatingLossTotal = unrealized;
-             const stepEq = currentCash + unrealized;
-             if (stepEq > peakEquity) peakEquity = stepEq;
-             maxDD = Math.max(maxDD, ((peakEquity - stepEq) / peakEquity) * 100);
-             equityCurve.push({ time: candle.time, value: stepEq });
-             equityDataMapRef.current.set(candle.time as number, { unrealized, equity: stepEq });
-
-             if (pos !== 'NONE') {
-                 const pnlPct = pos === 'LONG' ? ((candle.close - entryPriceValue) / entryPriceValue) * 100 : ((entryPriceValue - candle.close) / entryPriceValue) * 100;
-                 let closeReason = '';
-                 if (tpPercent > 0 && pnlPct >= tpPercent) closeReason = `TP Hit (+${tpPercent}%)`;
-                 else if (slPercent > 0 && pnlPct <= -slPercent) closeReason = `SL Hit (-${slPercent}%)`;
-                 else if (signal !== 'NONE' && signal !== pos) closeReason = 'Signal Flipped';
-                 if (closeReason) {
-                     const tradePnL = (pnlPct / 100) * currentCash;
-                     currentCash += tradePnL;
-                     if (tradePnL > 0) { grossProfit += tradePnL; winCount++; } else { grossLoss += Math.abs(tradePnL); }
-                      logs.push({ entryTime: new Date((entryTimeValue)*1000).toLocaleString('th-TH', tzOpts), exitTime: new Date((candle.time as number)*1000).toLocaleString('th-TH', tzOpts), type: pos, entryPrice: entryPriceValue, exitPrice: candle.close, pnl: tradePnL, reason: closeReason, maxFloatingLoss: maxUnrealizedTradeLoss });
-                     markers.push({ time: candle.time, position: pos === 'LONG' ? 'aboveBar' : 'belowBar', color: '#f6465d', shape: 'arrowDown', text: pos === 'LONG' ? 'SELL' : 'BUY(Close)' });
-                     pos = 'NONE'; maxUnrealizedTradeLoss = 0;
-                 }
-             }
-             if (pos === 'NONE' && (signal === 'LONG' || signal === 'SHORT')) {
-                pos = signal; entryPriceValue = candle.close; entryTimeValue = candle.time as number;
-                markers.push({ time: candle.time, position: pos === 'LONG' ? 'belowBar' : 'aboveBar', color: pos === 'LONG' ? '#0ecb81' : '#f6465d', shape: 'arrowUp', text: pos });
-             }
-         }
-         const lastClose = cdata[cdata.length - 1]?.close ?? 0;
-         const openPos: OpenPosition[] = pos !== 'NONE' ? [{ type: pos, entryPrice: entryPriceValue, currentPrice: lastClose, unrealizedPnl: pos === 'LONG' ? ((lastClose - entryPriceValue) / entryPriceValue) * currentCash : ((entryPriceValue - lastClose) / entryPriceValue) * currentCash }] : [];
-         finalResults = { netPnl: equityCurve[equityCurve.length-1].value - capital, netPnlPct: ((equityCurve[equityCurve.length-1].value - capital) / capital) * 100, worstFloatingLoss: worstFloatingLossTotal, winRate: logs.length > 0 ? (winCount / logs.length) * 100 : 0, winCount, lossCount: logs.length - winCount, maxDrawdown: maxDD, profitFactor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit, totalTrades: logs.length, openPositions: openPos };
+      if (!res.ok || body.error) {
+        const errMsg: string = body.error || 'Unknown error';
+        if (errMsg === 'Strategy AI service unavailable') {
+          setErrorMessage('Strategy AI service is not available. Please ensure the strategy-ai service is running.');
+        } else {
+          setErrorMessage(errMsg);
+        }
+        return;
       }
 
-      // Set chart data
-      candleSeriesRef.current?.setData(cdata);
-      equitySeriesRef.current?.setData(equityCurve);
-      
-      // Use createSeriesMarkers plugin for markers (v5 API)
-      const sortedMarkers = [...markers].sort((a,b) => (a.time as number) - (b.time as number));
-      setStoredMarkers(sortedMarkers);
-      setTradeLog(logs.reverse());
-      setResults(finalResults);
-
-      candleChartRef.current?.timeScale().fitContent();
-      chartRef.current?.timeScale().fitContent();
+      const result: BacktestResult = body;
+      equitySeriesRef.current?.setData(convertEquityCurve(result.equityCurve));
+      const markers = buildMarkersFromTrades(result.trades);
+      setStoredMarkers(markers);
+      setBacktestResult(result);
     } catch (e) {
       console.error(e);
-      alert('Backtest Failed: ' + (e as Error).message);
+      setErrorMessage('Network error — please check your connection');
+    } finally {
+      setIsRunning(false);
     }
-    setIsRunning(false);
   };
+
+  // Metrics display helpers — show '--' when no result or totalTrades === 0
+  const hasResult = backtestResult !== null && backtestResult.totalTrades > 0;
+  const sign = (n: number) => (n >= 0 ? '+' : '');
+
+  const netPnlDisplay = hasResult
+    ? `${sign(backtestResult!.totalPnl)}$${backtestResult!.totalPnl.toFixed(2)} (${sign(backtestResult!.netPnlPct)}${backtestResult!.netPnlPct.toFixed(1)}%)`
+    : '--';
+  const winRateDisplay = hasResult
+    ? `${backtestResult!.winRate.toFixed(1)}% (${backtestResult!.totalTrades}T)`
+    : '--';
+  const maxDdDisplay = hasResult
+    ? `${(backtestResult!.maxDrawdown * 100).toFixed(2)}%`
+    : '--';
+  const avgWlDisplay = hasResult
+    ? `+$${backtestResult!.avgWin.toFixed(2)} / -$${backtestResult!.avgLoss.toFixed(2)}`
+    : '--';
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '1rem', height: 'calc(100vh - 80px)', overflow: 'hidden' }}>
@@ -498,30 +324,100 @@ export default function Backtest() {
         </div>
         <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Strategy
           <select value={strategy} onChange={e => setStrategy(e.target.value)} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', borderRadius: '4px', marginTop: '0.2rem' }}>
-            <option value="EMA">EMA Crossover</option><option value="BB">BB Mean Reversion</option><option value="RSI">RSI Overbought/Oversold</option><option value="EMA_RSI">⚡ EMA + RSI</option><option value="BB_RSI">⚡ BB + RSI</option><option value="EMA_BB_RSI">⚡ EMA + BB + RSI</option><option value="GRID">Grid Bot</option>
+            <option value="EMA">EMA Crossover</option>
+            <option value="RSI">RSI Overbought/Oversold</option>
+            <option value="BB">BB Mean Reversion</option>
+            <option value="EMA_RSI">EMA + RSI</option>
+            <option value="BB_RSI">BB + RSI</option>
+            <option value="EMA_BB_RSI">EMA + BB + RSI</option>
+            <option value="GRID">Grid Bot</option>
+            <option value="AI_SCOUTER">AI Scouter</option>
+            <option value="EMA_SCALP">EMA Scalp</option>
+            <option value="STOCH_RSI">Stochastic RSI</option>
+            <option value="VWAP_SCALP">VWAP Scalp</option>
           </select>
         </label>
         {strategy === 'GRID' ? (
-           <div style={{ border: '1px solid var(--border-color)', padding: '0.5rem', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-             <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Upper
-               <input type="number" value={gridUpper} onChange={e => setGridUpper(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-             </label>
-             <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Lower
-               <input type="number" value={gridLower} onChange={e => setGridLower(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-             </label>
-             <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Grids
-               <input type="number" value={gridQuantity} onChange={e => setGridQuantity(parseInt(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-             </label>
-           </div>
+          <div style={{ border: '1px solid var(--border-color)', padding: '0.5rem', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Upper
+              <input type="number" value={gridUpper} onChange={e => setGridUpper(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+            </label>
+            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Lower
+              <input type="number" value={gridLower} onChange={e => setGridLower(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+            </label>
+            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Grids
+              <input type="number" value={gridQuantity} onChange={e => setGridQuantity(parseInt(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+            </label>
+          </div>
         ) : (
-           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-             <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>TP%
-               <input type="number" step="0.5" value={tpPercent} onChange={e => setTpPercent(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-             </label>
-             <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SL%
-               <input type="number" step="0.5" value={slPercent} onChange={e => setSlPercent(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-             </label>
-           </div>
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>TP%
+                <input type="number" step="0.5" value={tpPercent} onChange={e => setTpPercent(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+              </label>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SL%
+                <input type="number" step="0.5" value={slPercent} onChange={e => setSlPercent(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+              </label>
+            </div>
+            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Leverage
+              <input type="number" min="1" max="125" value={leverage} onChange={e => setLeverage(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', marginTop: '0.2rem' }} />
+            </label>
+          </>
+        )}
+        {/* Python Strategy Section */}
+        <div style={{ border: '1px solid var(--border-color)', padding: '0.5rem', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={isPythonMode} onChange={e => setIsPythonMode(e.target.checked)} />
+            Enable Python Strategy
+          </label>
+          {isPythonMode && (
+            <>
+              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Strategy Name
+                <select value={pythonStrategyName} onChange={e => setPythonStrategyName(e.target.value)} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem', marginTop: '0.2rem', borderRadius: '4px' }}>
+                  <option value="">-- select --</option>
+                  <option value="bb_breakout">bollinger_breakout</option>
+                </select>
+              </label>
+              <div style={{ fontSize: '0.7rem', color: '#f6a609' }}>⚠ Requires strategy-ai service</div>
+            </>
+          )}
+        </div>
+        {/* Compare Mode Toggle */}
+        <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
+          <input type="checkbox" checked={compareMode} onChange={e => setCompareMode(e.target.checked)} />
+          Compare Mode
+        </label>
+        {/* Compare Mode Controls */}
+        {compareMode && (
+          <div style={{ border: '1px solid var(--border-color)', padding: '0.5rem', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+            <button
+              onClick={addCurrentConfig}
+              disabled={compareConfigs.length >= 10}
+              style={{ background: 'var(--bg-dark)', color: 'var(--text-main)', border: '1px solid var(--border-color)', padding: '0.4rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+            >
+              + Add Current Config ({compareConfigs.length}/10)
+            </button>
+            {compareConfigs.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', maxHeight: '150px', overflowY: 'auto' }}>
+                {compareConfigs.map((cfg, idx) => (
+                  <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.72rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', padding: '0.2rem 0.4rem', borderRadius: '3px' }}>
+                    <span>{cfg.strategy}-{cfg.interval}-{cfg.tpPercent}/{cfg.slPercent}</span>
+                    <button
+                      onClick={() => setCompareConfigs(prev => prev.filter((_, i) => i !== idx))}
+                      style={{ background: 'transparent', border: 'none', color: 'var(--loss-color)', cursor: 'pointer', fontSize: '0.8rem', padding: '0 0.2rem' }}
+                    >✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              onClick={handleRunCompare}
+              disabled={isRunning || compareConfigs.length === 0}
+              style={{ background: compareConfigs.length > 0 ? 'var(--accent-primary)' : 'var(--bg-dark)', color: '#fff', border: 'none', padding: '0.5rem', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.8rem' }}
+            >
+              {isRunning ? 'Running...' : '⚡ Run Comparison'}
+            </button>
+          </div>
         )}
         <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Capital
           <input type="number" value={capital} onChange={e => setCapital(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', marginTop: '0.2rem' }} />
@@ -536,52 +432,51 @@ export default function Backtest() {
         {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '0.6rem' }}>
           {[
-            { label: 'Net PnL', value: results ? `${results.netPnl >= 0 ? '+' : ''}$${results.netPnl.toFixed(2)} (${results.netPnlPct >= 0 ? '+' : ''}${results.netPnlPct.toFixed(1)}%)` : '--', color: results && results.netPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)' },
-            { label: 'Peak Float Loss', value: results ? (results.worstFloatingLoss < 0 ? `-$${Math.abs(results.worstFloatingLoss).toFixed(2)}` : '$0.00') : '--', color: 'var(--loss-color)' },
-            { label: 'Win Rate', value: results ? `${results.winRate.toFixed(1)}% (${results.winCount}W / ${results.lossCount}L)` : '--', color: '#fff' },
-            { label: 'Max DD', value: results ? `${results.maxDrawdown.toFixed(2)}%` : '--', color: 'var(--loss-color)' },
-            { label: 'P. Factor', value: results ? results.profitFactor.toFixed(2) : '--', color: '#fff' },
-            { label: 'Trades', value: results ? results.totalTrades : '--', color: '#fff' },
-            { label: 'Open Pos.', value: results ? (results.openPositions.length > 0 ? `${results.openPositions.length} Active` : 'None') : '--', color: results && results.openPositions.length > 0 ? '#f0b90b' : '#0ecb81' }
+            { label: 'Net PnL', value: netPnlDisplay, color: hasResult && backtestResult!.totalPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)' },
+            { label: 'Win Rate', value: winRateDisplay, color: '#fff' },
+            { label: 'Max DD', value: maxDdDisplay, color: 'var(--loss-color)' },
+            { label: 'P. Factor', value: hasResult ? backtestResult!.profitFactor.toFixed(2) : '--', color: '#fff' },
+            { label: 'Sharpe', value: hasResult ? backtestResult!.sharpeRatio.toFixed(2) : '--', color: '#fff' },
+            { label: 'Avg W/L', value: avgWlDisplay, color: '#fff' },
+            { label: 'Max Cons. Loss', value: hasResult ? String(backtestResult!.maxConsecutiveLosses) : '--', color: '#fff' },
           ].map((stat, i) => (
             <div key={i} className="glass-panel" style={{ padding: '0.6rem', textAlign: 'center' }}>
-               <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>{stat.label}</div>
-               <div style={{ fontSize: '1rem', fontWeight: 'bold', color: stat.color }}>{stat.value}</div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>{stat.label}</div>
+              <div style={{ fontSize: '1rem', fontWeight: 'bold', color: stat.color }}>{stat.value}</div>
             </div>
           ))}
         </div>
 
+        {/* Error message */}
+        {errorMessage && (
+          <div style={{ background: 'rgba(246,70,93,0.15)', border: '1px solid var(--loss-color)', borderRadius: '4px', padding: '0.6rem 1rem', color: 'var(--loss-color)', fontSize: '0.85rem' }}>
+            {errorMessage}
+          </div>
+        )}
+
         {/* Tabs */}
         <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border-color)' }}>
           <button onClick={() => setActiveTab('charts')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'charts' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'charts' ? '2px solid var(--accent-primary)' : 'none' }}>Charts</button>
-          <button onClick={() => setActiveTab('log')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'log' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'log' ? '2px solid var(--accent-primary)' : 'none' }}>Trade Log ({tradeLog.length})</button>
+          <button onClick={() => setActiveTab('log')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'log' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'log' ? '2px solid var(--accent-primary)' : 'none' }}>
+            Trade Log ({backtestResult?.trades.length ?? 0})
+          </button>
+          <button onClick={() => { setActiveTab('history'); loadHistory(); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'history' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'history' ? '2px solid var(--accent-primary)' : 'none' }}>History</button>
+          <button onClick={() => setActiveTab('compare')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'compare' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'compare' ? '2px solid var(--accent-primary)' : 'none' }}>Compare</button>
         </div>
 
         {/* Charts */}
         <div style={{ display: activeTab === 'charts' ? 'flex' : 'none', flexDirection: 'column', gap: '1rem', position: 'relative' }}>
-          {hoverData && (
-            <div style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(0,0,0,0.85)', border: '1px solid var(--accent-primary)', padding: '0.5rem 0.8rem', borderRadius: '4px', zIndex: 100, fontSize: '0.75rem', pointerEvents: 'none' }}>
-              <div style={{ color: '#fff' }}>Equity: <b>${hoverData.equity.toFixed(2)}</b></div>
-              <div style={{ color: hoverData.unrealized >= 0 ? 'var(--profit-color)' : 'var(--loss-color)' }}>Unrealized: <b>{hoverData.unrealized >= 0 ? '+' : ''}${hoverData.unrealized.toFixed(2)}</b></div>
-            </div>
-          )}
           <div className="glass-panel" style={{ padding: '1rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-              <h5 className="m-0">Market & Indicators</h5>
-              <button onClick={() => setShowMarkers(v => !v)} style={{ background: showMarkers ? 'var(--accent-primary)' : 'transparent', color: showMarkers ? '#fff' : 'var(--text-main)', border: '1px solid #444', padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer' }}>{showMarkers ? 'Hide Markers' : 'Show Markers'}</button>
+              <h5 className="m-0">Market</h5>
+              <button onClick={() => setShowMarkers(v => !v)} style={{ background: showMarkers ? 'var(--accent-primary)' : 'transparent', color: showMarkers ? '#fff' : 'var(--text-main)', border: '1px solid #444', padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer' }}>
+                {showMarkers ? 'Hide Markers' : 'Show Markers'}
+              </button>
             </div>
             <div style={{ height: '320px', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
               <div ref={candleChartContainerRef} style={{ width: '100%', height: '100%' }} />
             </div>
           </div>
-          {(strategy === 'RSI' || strategy === 'EMA_RSI' || strategy === 'BB_RSI' || strategy === 'EMA_BB_RSI') && (
-            <div className="glass-panel" style={{ padding: '1rem' }}>
-              <h5 className="m-0" style={{ marginBottom: '0.5rem' }}>RSI (14)</h5>
-              <div style={{ height: '120px', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
-                <div ref={rsiChartContainerRef} style={{ width: '100%', height: '100%' }} />
-              </div>
-            </div>
-          )}
           <div className="glass-panel" style={{ padding: '1rem' }}>
             <h5 className="m-0" style={{ marginBottom: '0.5rem' }}>Portfolio Equity Curve</h5>
             <div style={{ height: '180px', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
@@ -596,58 +491,138 @@ export default function Backtest() {
             <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-card)', zIndex: 10 }}>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                  <th style={{ padding: '0.5rem' }}>Entry Time</th><th>Exit Time</th><th>Type</th><th>Entry $</th><th>Exit $</th>
-                  <th style={{ textAlign: 'right' }}>PnL</th><th style={{ textAlign: 'right' }}>Max Float Loss</th>
+                  <th style={{ padding: '0.5rem' }}>Entry Time</th>
+                  <th>Exit Time</th>
+                  <th>Type</th>
+                  <th>Entry $</th>
+                  <th>Exit $</th>
+                  <th>Entry Reason</th>
+                  <th style={{ textAlign: 'right' }}>Confidence</th>
+                  <th style={{ textAlign: 'right' }}>PnL</th>
+                  <th style={{ textAlign: 'right' }}>PnL%</th>
+                  <th style={{ textAlign: 'right' }}>Exit Reason</th>
                 </tr>
               </thead>
               <tbody>
-                {tradeLog.map((log, i) => (
+                {backtestResult && backtestResult.trades.length > 0 ? sortTradesDescending(backtestResult.trades).map((trade: Trade, i: number) => (
                   <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td style={{ padding: '0.5rem' }}>{log.entryTime}</td><td>{log.exitTime}</td>
-                    <td style={{ color: log.type.includes('BUY') || log.type === 'LONG' ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>{log.type}</td>
-                    <td>${log.entryPrice.toFixed(2)}</td><td>${log.exitPrice.toFixed(2)}</td>
-                    <td style={{ textAlign: 'right', color: log.pnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>{log.pnl >= 0 ? '+' : ''}${log.pnl.toFixed(2)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--loss-color)' }}>{log.maxFloatingLoss ? `-$${Math.abs(log.maxFloatingLoss).toFixed(2)}` : '--'}</td>
+                    <td style={{ padding: '0.5rem' }}>{trade.entryTime}</td>
+                    <td>{trade.exitTime}</td>
+                    <td style={{ color: trade.type === 'LONG' ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>{trade.type}</td>
+                    <td>${trade.entryPrice.toFixed(2)}</td>
+                    <td>${trade.exitPrice.toFixed(2)}</td>
+                    <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '200px' }}>{trade.entryReason ?? '—'}</td>
+                    <td style={{ textAlign: 'right', fontSize: '0.8rem', color: trade.entryConfidence != null ? (trade.entryConfidence >= 0.7 ? 'var(--profit-color)' : trade.entryConfidence >= 0.5 ? '#f6a609' : 'var(--loss-color)') : 'var(--text-muted)' }}>
+                      {trade.entryConfidence != null ? `${(trade.entryConfidence * 100).toFixed(0)}%` : '—'}
+                    </td>
+                    <td style={{ textAlign: 'right', color: trade.pnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>
+                      {trade.pnl >= 0 ? '+' : ''}${trade.pnl.toFixed(2)}
+                    </td>
+                    <td style={{ textAlign: 'right', color: trade.pnlPct >= 0 ? 'var(--profit-color)' : 'var(--loss-color)' }}>
+                      {trade.pnlPct >= 0 ? '+' : ''}{trade.pnlPct.toFixed(2)}%
+                    </td>
+                    <td style={{ textAlign: 'right' }}>{trade.exitReason}</td>
                   </tr>
-                ))}
-                {tradeLog.length === 0 && (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Run backtest to see trade log.</td></tr>
+                )) : (
+                  <tr><td colSpan={10} style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Run backtest to see trade log.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
-          {/* Open Positions */}
-          {results && results.openPositions.length > 0 && (
-            <div style={{ marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '0.75rem' }}>
-              <h5 style={{ margin: '0 0 0.5rem 0', color: '#f0b90b' }}>⚠ Open Positions at End ({results.openPositions.length})</h5>
+        </div>
+
+        {/* History */}
+        {activeTab === 'history' && (
+          <div className="glass-panel" style={{ overflow: 'auto', height: 'calc(100vh - 280px)' }}>
+            {historyLoading && (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>Loading history...</div>
+            )}
+            {historyError && !historyLoading && (
+              <div style={{ background: 'rgba(246,70,93,0.15)', border: '1px solid var(--loss-color)', borderRadius: '4px', padding: '0.6rem 1rem', color: 'var(--loss-color)', fontSize: '0.85rem', margin: '1rem' }}>
+                {historyError}
+              </div>
+            )}
+            {!historyLoading && !historyError && historyList.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>No backtest history yet.</div>
+            )}
+            {!historyLoading && !historyError && historyList.length > 0 && (
               <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead>
+                <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-card)', zIndex: 10 }}>
                   <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                    <th style={{ padding: '0.4rem' }}>Type</th><th>Entry $</th><th>Current $</th><th style={{ textAlign: 'right' }}>Unrealized PnL</th>{strategy === 'GRID' && <th style={{ textAlign: 'right' }}>Size</th>}
+                    <th style={{ padding: '0.5rem' }}>Symbol</th>
+                    <th>Strategy</th>
+                    <th>Interval</th>
+                    <th style={{ textAlign: 'right' }}>PnL</th>
+                    <th style={{ textAlign: 'right' }}>Win Rate</th>
+                    <th style={{ textAlign: 'right' }}>Trades</th>
+                    <th style={{ textAlign: 'right' }}>Date</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {results.openPositions.map((op, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '0.4rem', color: '#f0b90b', fontWeight: 'bold' }}>{op.type}</td>
-                      <td>${op.entryPrice.toFixed(2)}</td>
-                      <td>${op.currentPrice.toFixed(2)}</td>
-                      <td style={{ textAlign: 'right', color: op.unrealizedPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>{op.unrealizedPnl >= 0 ? '+' : ''}${op.unrealizedPnl.toFixed(2)}</td>
-                      {strategy === 'GRID' && <td style={{ textAlign: 'right' }}>${op.size?.toFixed(2)}</td>}
+                  {historyList.map((item) => (
+                    <tr
+                      key={item.backtestId}
+                      onClick={() => loadHistoryItem(item.backtestId)}
+                      style={{ borderBottom: '1px solid var(--border-color)', cursor: 'pointer' }}
+                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.04)')}
+                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <td style={{ padding: '0.5rem' }}>{item.symbol}</td>
+                      <td>{item.strategy}</td>
+                      <td>{item.interval}</td>
+                      <td style={{ textAlign: 'right', color: item.totalPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>
+                        {item.totalPnl >= 0 ? '+' : ''}${item.totalPnl.toFixed(2)}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>{item.winRate.toFixed(1)}%</td>
+                      <td style={{ textAlign: 'right' }}>{item.totalTrades}</td>
+                      <td style={{ textAlign: 'right' }}>{item.createdAt}</td>
                     </tr>
                   ))}
-                  <tr style={{ borderTop: '2px solid var(--border-color)', fontWeight: 'bold' }}>
-                    <td style={{ padding: '0.4rem' }} colSpan={3}>Total Unrealized</td>
-                    <td style={{ textAlign: 'right', color: results.openPositions.reduce((s,o) => s + o.unrealizedPnl, 0) >= 0 ? 'var(--profit-color)' : 'var(--loss-color)' }}>
-                      {results.openPositions.reduce((s,o) => s + o.unrealizedPnl, 0) >= 0 ? '+' : ''}${results.openPositions.reduce((s,o) => s + o.unrealizedPnl, 0).toFixed(2)}
-                    </td>
-                    {strategy === 'GRID' && <td style={{ textAlign: 'right' }}>${results.openPositions.reduce((s,o) => s + (o.size ?? 0), 0).toFixed(2)}</td>}
-                  </tr>
                 </tbody>
               </table>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
+
+        {/* Compare */}
+        {activeTab === 'compare' && (
+          <div className="glass-panel" style={{ overflow: 'auto', height: 'calc(100vh - 280px)' }}>
+            {compareResults.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--text-muted)' }}>No comparison results yet.</div>
+            ) : (
+              <table style={{ width: '100%', textAlign: 'left', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-card)', zIndex: 10 }}>
+                  <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '0.5rem' }}>Rank</th>
+                    <th>Config</th>
+                    <th style={{ textAlign: 'right' }}>PnL</th>
+                    <th style={{ textAlign: 'right' }}>Win Rate</th>
+                    <th style={{ textAlign: 'right' }}>Sharpe</th>
+                    <th style={{ textAlign: 'right' }}>Max DD</th>
+                    <th style={{ textAlign: 'right' }}>P.Factor</th>
+                    <th style={{ textAlign: 'right' }}>Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...compareResults].sort((a, b) => a.rank - b.rank).map((result) => (
+                    <tr key={result.rank} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                      <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>#{result.rank}</td>
+                      <td>{result.configLabel}</td>
+                      <td style={{ textAlign: 'right', color: result.error ? 'var(--text-muted)' : result.totalPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>
+                        {result.error ? '--' : `${result.totalPnl >= 0 ? '+' : ''}$${result.totalPnl.toFixed(2)}`}
+                      </td>
+                      <td style={{ textAlign: 'right' }}>{result.error ? '--' : `${result.winRate.toFixed(1)}%`}</td>
+                      <td style={{ textAlign: 'right' }}>{result.error ? '--' : result.sharpeRatio.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right' }}>{result.error ? '--' : `${(result.maxDrawdown * 100).toFixed(2)}%`}</td>
+                      <td style={{ textAlign: 'right' }}>{result.error ? '--' : result.profitFactor.toFixed(2)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--loss-color)', fontSize: '0.75rem' }}>{result.error ?? ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

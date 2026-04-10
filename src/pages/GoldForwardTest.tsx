@@ -11,6 +11,9 @@ const STRATEGIES = [
   { value: 'EMA_RSI', label: '⚡ EMA + RSI' },
   { value: 'BB_RSI', label: '⚡ BB + RSI' },
   { value: 'GRID', label: '🌐 Grid (Mean Reversion)' },
+  { value: 'EMA_SCALP', label: '⚡ EMA Scalp (3/8 Fast)' },
+  { value: 'STOCH_RSI', label: '🎯 Stochastic RSI Scalp' },
+  { value: 'VWAP_SCALP', label: '📊 VWAP Scalp + Momentum' },
 ];
 
 const ozPerStdLot = 100;
