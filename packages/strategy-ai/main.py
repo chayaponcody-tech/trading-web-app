@@ -1,16 +1,36 @@
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import time
 import requests
 import numpy as np
 
+from logger import get_logger
 from registry import StrategyRegistry
+from pine_loader import load_pine_strategies
 from strategies.bollinger_breakout import BollingerBreakout
+from strategies.ema_cross import EMACross
+from strategies.rsi_strategy import RSIStrategy
+from strategies.bollinger_bands import BollingerBandsStrategy
+from strategies.composite import EMARSIStrategy, BBRSIStrategy, EMABBRSIStrategy
+from strategies.ema_scalp import EMAScalpStrategy
+from strategies.stoch_rsi import StochRSIStrategy
+from strategies.vwap_scalp import VWAPScalpStrategy
+from strategies.scouter import ScouterStrategy
+from strategies.grid import GridStrategy
+from strategies.oi_funding_alpha import OIFundingAlphaStrategy
 from confidence_engine import ConfidenceEngine
 from microstructure_filter import check as microstructure_check
-from schemas import AnalyzeRequest, AnalyzeResponse, StrategyListResponse
+from schemas import AnalyzeRequest, AnalyzeResponse, BatchAnalyzeRequest, BatchAnalyzeResponse, StrategyListResponse, StrategyEntry, RegisterDynamicRequest, UnregisterRequest, SavePineRequest, OptimizeRequest, OptimizeResponse, VbtOptimizeRequest, VbtOptimizeResponse
+from vbt_optimizer import run_vbt_optimize, VBT_AVAILABLE
+import optuna
+
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+from base_strategy import BaseStrategy
 
 app = FastAPI(title="CryptoSmartTrade - Strategy AI (Quant Brain)")
+
+log = get_logger("strategy-ai")
 
 app.add_middleware(
     CORSMiddleware,
@@ -18,6 +38,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def activity_log_middleware(request: Request, call_next):
+    """Log every incoming request with method, path, status, and latency."""
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    # Skip noisy health-check spam
+    if request.url.path not in ("/health", "/"):
+        log.info(
+            f"{request.method} {request.url.path} → {response.status_code} "
+            f"({elapsed_ms:.1f}ms)"
+        )
+
+    return response
 
 GATEWAY_URL = os.environ.get("GATEWAY_INTERNAL_URL", "http://backend:4001")
 AI_MODE = os.environ.get("STRATEGY_AI_MODE", "ml")  # off | ml | full
@@ -30,6 +67,24 @@ CONFIDENCE_THRESHOLD = 0.60
 
 registry = StrategyRegistry()
 registry.register("bb_breakout", BollingerBreakout())
+registry.register("EMA", EMACross())
+registry.register("EMA_CROSS", EMACross())
+registry.register("EMA_CROSS_V2", EMACross())
+registry.register("RSI", RSIStrategy())
+registry.register("RSI_TREND", RSIStrategy())
+registry.register("BB", BollingerBandsStrategy())
+registry.register("EMA_RSI", EMARSIStrategy())
+registry.register("BB_RSI", BBRSIStrategy())
+registry.register("EMA_BB_RSI", EMABBRSIStrategy())
+registry.register("EMA_SCALP", EMAScalpStrategy())
+registry.register("STOCH_RSI", StochRSIStrategy())
+registry.register("VWAP_SCALP", VWAPScalpStrategy())
+registry.register("AI_SCOUTER", ScouterStrategy())
+registry.register("GRID", GridStrategy())
+registry.register("OI_FUNDING_ALPHA", OIFundingAlphaStrategy())
+
+loaded = load_pine_strategies(registry, "strategies/")
+log.info(f"🌲 [PineLoader] Loaded {len(loaded)} pine strategies: {loaded}")
 
 confidence_engine = ConfidenceEngine(
     mode=AI_MODE,
@@ -40,8 +95,21 @@ confidence_engine = ConfidenceEngine(
 
 # ─── Feature Engineering ──────────────────────────────────────────────────────
 
-def compute_features(closes: list[float]) -> dict:
-    """Compute quantitative features from close prices."""
+def compute_atr(highs: list[float], lows: list[float], closes: list[float], period: int = 14) -> float:
+    """Compute ATR(period) from OHLC arrays. Returns 0.0 if insufficient data."""
+    h = np.array(highs, dtype=float)
+    l = np.array(lows, dtype=float)
+    c = np.array(closes, dtype=float)
+    n = min(len(h), len(l), len(c))
+    if n < period + 1:
+        return 0.0
+    h, l, c = h[:n], l[:n], c[:n]
+    tr = np.maximum(h[1:] - l[1:], np.maximum(np.abs(h[1:] - c[:-1]), np.abs(l[1:] - c[:-1])))
+    return float(np.mean(tr[-period:]))
+
+
+def compute_features(closes: list[float], highs: list[float] = None, lows: list[float] = None) -> dict:
+    """Compute quantitative features from close prices (+ optional OHLC for ATR)."""
     arr = np.array(closes, dtype=float)
     if len(arr) < 20:
         return {}
@@ -84,6 +152,9 @@ def compute_features(closes: list[float]) -> dict:
     # Candle body ratio (last candle)
     body = abs(arr[-1] - arr[-2]) / (arr[-2] + 1e-9) if len(arr) >= 2 else 0
 
+    # ATR (14) — requires highs/lows; falls back to 0 if not provided
+    atr = compute_atr(highs, lows, closes) if (highs and lows) else 0.0
+
     return {
         "rsi": float(rsi),
         "ema20": float(ema20),
@@ -94,6 +165,7 @@ def compute_features(closes: list[float]) -> dict:
         "momentum": float(momentum),
         "body_ratio": float(body),
         "price": float(price),
+        "atr": atr,
     }
 
 
@@ -282,7 +354,10 @@ async def strategy_analyze(req: AnalyzeRequest):
     }
 
     if not micro.passed:
-        print(f"🚫 [{req.symbol}] Microstructure BLOCK: {micro.reason}")
+        log.warning(f"🚫 [{req.symbol}] Microstructure BLOCK: {micro.reason}")
+        features = compute_features(req.closes, req.highs, req.lows)
+        regime = detect_regime(features)
+        atr_value = features.get("atr", 0.0) or None
         return AnalyzeResponse(
             symbol=req.symbol,
             signal="NONE",
@@ -292,14 +367,18 @@ async def strategy_analyze(req: AnalyzeRequest):
             metadata=result["metadata"],
             strategy=req.strategy,
             microstructure=micro_detail,
+            atr_value=round(atr_value, 6) if atr_value else None,
+            regime=regime,
         )
 
     # ── Step 3: Feature engineering + Confidence score ───────────────────────
-    features = compute_features(req.closes)
+    features = compute_features(req.closes, req.highs, req.lows)
     regime = detect_regime(features)
+    atr_value = features.get("atr", 0.0) or None
 
     confidence, reason = confidence_engine.score(
-        raw_signal, features, regime, result["metadata"]
+        raw_signal, features, regime, result["metadata"],
+        closes=req.closes, highs=req.highs, lows=req.lows,
     )
 
     # Apply microstructure soft penalty
@@ -309,9 +388,9 @@ async def strategy_analyze(req: AnalyzeRequest):
 
     final_signal = raw_signal if confidence >= CONFIDENCE_THRESHOLD else "NONE"
 
-    print(
+    log.info(
         f"🧠 [{req.symbol}] strategy={req.strategy} signal={raw_signal}→{final_signal} "
-        f"confidence={confidence:.0%} regime={regime} | {reason}"
+        f"confidence={confidence:.0%} regime={regime} atr={atr_value:.4f if atr_value else 'N/A'} | {reason}"
     )
 
     return AnalyzeResponse(
@@ -323,13 +402,156 @@ async def strategy_analyze(req: AnalyzeRequest):
         metadata=result["metadata"],
         strategy=req.strategy,
         microstructure=micro_detail,
+        atr_value=round(atr_value, 6) if atr_value else None,
+        regime=regime,
     )
+
+
+@app.post("/strategy/analyze/batch", response_model=BatchAnalyzeResponse)
+async def strategy_analyze_batch(req: BatchAnalyzeRequest):
+    """
+    Batch analysis endpoint.
+    Returns a SignalArray and ConfidenceArray for all N candles in the input.
+
+    Validation:
+    - closes must have >= 50 elements (HTTP 422 otherwise)
+    - all arrays (closes, highs, lows, volumes) must have the same length (HTTP 422 otherwise)
+
+    Signal computation uses no-look-ahead equivalence: for candle i, only the
+    first (i+1) elements of each array are visible to the strategy, matching
+    what POST /strategy/analyze would see if called N times with growing slices.
+    Indicator math inside each strategy uses vectorized pandas/numpy over the slice.
+    """
+    n = len(req.closes)
+
+    if n < 50:
+        raise HTTPException(
+            status_code=422,
+            detail=f"closes must have at least 50 elements, got {n}",
+        )
+
+    lengths = {"highs": len(req.highs), "lows": len(req.lows), "volumes": len(req.volumes)}
+    mismatched = {k: v for k, v in lengths.items() if v != n}
+    if mismatched:
+        detail = "; ".join(f"{k} has {v} elements (expected {n})" for k, v in mismatched.items())
+        raise HTTPException(status_code=422, detail=f"Array length mismatch: {detail}")
+
+    try:
+        strategy = registry.get(req.strategy)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    closes_arr = np.array(req.closes, dtype=float)
+    highs_arr = np.array(req.highs, dtype=float)
+    lows_arr = np.array(req.lows, dtype=float)
+    volumes_arr = np.array(req.volumes, dtype=float)
+
+    signals: list[str] = []
+    confidences: list[float] = []
+
+    # Iterate over candles maintaining no-look-ahead: candle i sees only [:i+1]
+    for i in range(n):
+        end = i + 1
+        result = strategy.compute_signal(
+            closes_arr[:end].tolist(),
+            highs_arr[:end].tolist(),
+            lows_arr[:end].tolist(),
+            volumes_arr[:end].tolist(),
+            req.params,
+        )
+        raw_signal = result.get("signal", "NONE")
+
+        features = compute_features(closes_arr[:end].tolist())
+        regime = detect_regime(features)
+        confidence, _ = confidence_engine.score(
+            raw_signal, features, regime, result.get("metadata", {}),
+            closes=closes_arr[:end].tolist(),
+            highs=highs_arr[:end].tolist(),
+            lows=lows_arr[:end].tolist(),
+        )
+        confidence = max(0.0, min(1.0, confidence))
+
+        signals.append(raw_signal)
+        confidences.append(round(confidence, 4))
+
+    longs  = signals.count("LONG")
+    shorts = signals.count("SHORT")
+    log.info(
+        f"[Batch] strategy={req.strategy} candles={n} "
+        f"LONG={longs} SHORT={shorts} NONE={n - longs - shorts}"
+    )
+
+    return BatchAnalyzeResponse(signals=signals, confidences=confidences)
 
 
 @app.get("/strategy/list", response_model=StrategyListResponse)
 async def strategy_list():
-    """Return all registered strategy keys."""
-    return StrategyListResponse(strategies=registry.list_keys())
+    """Return all registered Python strategy keys with engine tag."""
+    entries = [{"key": k, "engine": "python"} for k in registry.list_keys()]
+    return StrategyListResponse(strategies=entries)
+
+
+@app.post("/strategy/register-dynamic")
+async def register_dynamic(req: RegisterDynamicRequest):
+    """Compile and register a dynamic Python strategy class at runtime."""
+    namespace = {}
+    try:
+        exec(req.python_code, namespace)
+    except SyntaxError as e:
+        raise HTTPException(status_code=400, detail=f"Python syntax error: {e}")
+
+    strategy_class = None
+    for obj in namespace.values():
+        if isinstance(obj, type) and issubclass(obj, BaseStrategy) and obj is not BaseStrategy:
+            strategy_class = obj
+            break
+
+    if not strategy_class:
+        raise HTTPException(status_code=400, detail="ไม่พบ class ที่ extend BaseStrategy")
+
+    registry.register(req.key, strategy_class())
+    log.info(f"[Registry] Dynamic strategy registered: key={req.key}")
+    return {"registered": True, "key": req.key}
+
+
+@app.delete("/strategy/unregister")
+async def unregister_strategy(req: UnregisterRequest):
+    """Remove a dynamically registered strategy from the registry."""
+    if req.key not in registry._strategies:
+        return {"unregistered": False}
+    del registry._strategies[req.key]
+    log.info(f"[Registry] Strategy unregistered: key={req.key}")
+    return {"unregistered": True}
+
+
+@app.post("/strategy/save-pine")
+async def save_pine(req: SavePineRequest):
+    """Save a Pine Script-converted strategy to disk and register it permanently."""
+    if req.key in registry._strategies:
+        raise HTTPException(status_code=409, detail="Strategy name already exists")
+
+    os.makedirs("strategies", exist_ok=True)
+    with open(f"strategies/{req.filename}", "w") as f:
+        f.write(req.python_code)
+
+    namespace = {}
+    try:
+        exec(req.python_code, namespace)
+    except SyntaxError as e:
+        raise HTTPException(status_code=400, detail=f"Python syntax error: {e}")
+
+    strategy_class = None
+    for obj in namespace.values():
+        if isinstance(obj, type) and issubclass(obj, BaseStrategy) and obj is not BaseStrategy:
+            strategy_class = obj
+            break
+
+    if not strategy_class:
+        raise HTTPException(status_code=400, detail="ไม่พบ class ที่ extend BaseStrategy")
+
+    registry.register(req.key, strategy_class())
+    log.info(f"[Registry] Pine strategy saved and registered: key={req.key} file={req.filename}")
+    return {"strategyKey": req.key, "message": "บันทึกสำเร็จ"}
 
 
 @app.post("/analyze-signal")
@@ -363,7 +585,7 @@ async def analyze_signal(req: Request):
         confidence = (confidence + llm_conf) / 2
         reason = f"[ML+LLM] {llm_reason}"
 
-    print(f"🧠 [{symbol}] signal={signal} regime={regime} confidence={confidence:.2f} — {reason}")
+    log.info(f"🧠 [{symbol}] signal={signal} regime={regime} confidence={confidence:.2f} — {reason}")
 
     return {
         "symbol": symbol,
@@ -373,6 +595,166 @@ async def analyze_signal(req: Request):
         "reason": reason,
         "features": {k: round(v, 4) for k, v in features.items() if k != "price"},
     }
+
+
+@app.post("/strategy/optimize", response_model=OptimizeResponse)
+async def strategy_optimize(req: OptimizeRequest):
+    """
+    Bayesian parameter optimization using Optuna.
+    Searches the parameter space to maximize SharpeRatio over the provided OHLCV data.
+    """
+    try:
+        strategy = registry.get(req.strategy)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    closes = req.closes
+    highs = req.highs
+    lows = req.lows
+    volumes = req.volumes
+
+    log.info(f"[Optimize/Optuna] strategy={req.strategy} candles={len(closes)} trials={req.n_trials}")
+
+    def objective(trial: optuna.Trial) -> float:
+        params = {}
+        for param_name, bounds in req.search_space.items():
+            lo, hi = bounds[0], bounds[1]
+            if isinstance(lo, int) and isinstance(hi, int):
+                params[param_name] = trial.suggest_int(param_name, lo, hi)
+            else:
+                params[param_name] = trial.suggest_float(param_name, float(lo), float(hi))
+
+        # For SharpeRatio we need a signal series — use batch-style iteration
+        signal_list = []
+        for i in range(len(closes)):
+            end = i + 1
+            r = strategy.compute_signal(
+                closes[:end], highs[:end], lows[:end], volumes[:end], params
+            )
+            signal_list.append(r.get("signal", "NONE"))
+
+        # Compute returns based on signals
+        returns = []
+        for i in range(1, len(closes)):
+            sig = signal_list[i - 1]
+            ret = (closes[i] - closes[i - 1]) / closes[i - 1]
+            if sig == "LONG":
+                returns.append(ret)
+            elif sig == "SHORT":
+                returns.append(-ret)
+            else:
+                returns.append(0.0)
+
+        if len(returns) < 2:
+            return 0.0
+
+        arr = np.array(returns, dtype=float)
+        std = np.std(arr)
+        if std == 0:
+            return 0.0
+
+        sharpe = float(np.mean(arr) / std * np.sqrt(252))
+        return sharpe
+
+    study = optuna.create_study(direction="maximize")
+    study.optimize(objective, n_trials=req.n_trials)
+
+    log.info(
+        f"[Optimize/Optuna] done strategy={req.strategy} "
+        f"best_sharpe={study.best_value:.4f} best_params={study.best_params}"
+    )
+
+    return OptimizeResponse(
+        best_params=study.best_params,
+        best_sharpe=study.best_value,
+        n_trials=len(study.trials),
+    )
+
+
+@app.post("/strategy/optimize/vectorbt", response_model=VbtOptimizeResponse)
+async def strategy_optimize_vectorbt(req: VbtOptimizeRequest):
+    """
+    VectorBT-powered parameter optimization.
+
+    Faster than /strategy/optimize (Optuna) for grid-style sweeps because
+    vectorbt runs portfolio simulation in vectorized NumPy/Numba instead of
+    a Python loop. Falls back to pure NumPy if vectorbt is not installed.
+
+    Returns best_params, best_sharpe, best_return, best_max_drawdown.
+    """
+    try:
+        strategy = registry.get(req.strategy)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    log.info(
+        f"[Optimize/VBT] strategy={req.strategy} candles={len(req.closes)} "
+        f"trials={req.n_trials} vbt_available={VBT_AVAILABLE}"
+    )
+
+    result = run_vbt_optimize(
+        strategy=strategy,
+        closes=req.closes,
+        highs=req.highs,
+        lows=req.lows,
+        volumes=req.volumes,
+        search_space=req.search_space,
+        n_trials=req.n_trials,
+        fees=req.fees,
+        slippage=req.slippage,
+        init_cash=req.init_cash,
+    )
+
+    log.info(
+        f"[Optimize/VBT] done strategy={req.strategy} engine={result['engine']} "
+        f"best_sharpe={result['best_sharpe']} return={result['best_return']}% "
+        f"mdd={result['best_max_drawdown']} best_params={result['best_params']}"
+    )
+
+    return VbtOptimizeResponse(**result)
+
+
+@app.get("/admin/log-level")
+async def get_log_level():
+    """Return the current log level of the strategy-ai service."""
+    import logging
+    current = logging.getLogger("strategy-ai").level
+    name = logging.getLevelName(current) if current != 0 else LOG_LEVEL
+    return {"level": name}
+
+
+@app.post("/admin/log-level")
+async def set_log_level(request: Request):
+    """
+    Change the log level at runtime without restarting the container.
+    Accepted values: DEBUG | INFO | WARNING | ERROR | CRITICAL
+    """
+    import logging
+    body = await request.json()
+    level_str = body.get("level", "INFO").upper()
+
+    valid = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    if level_str not in valid:
+        raise HTTPException(status_code=400, detail=f"Invalid level '{level_str}'. Use one of: {sorted(valid)}")
+
+    numeric = getattr(logging, level_str)
+
+    # Update every logger that uses our shared handler
+    for name in ("strategy-ai", "confidence-engine", "vbt-optimizer"):
+        logging.getLogger(name).setLevel(numeric)
+
+    # Also update the shared handler level
+    for handler in logging.getLogger("strategy-ai").handlers:
+        handler.setLevel(numeric)
+
+    log.info(f"[Admin] Log level changed → {level_str}")
+    return {"level": level_str, "ok": True}
+
+
+@app.get("/strategy/optimize/vectorbt/status")
+async def vbt_status():
+    """Check whether vectorbt is installed and available."""
+    return {"vectorbt_available": VBT_AVAILABLE}
 
 
 @app.post("/request-execute")

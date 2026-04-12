@@ -21,6 +21,7 @@ import { createConfigRoutes }    from './routes/configRoutes.js';
 import { createPortfolioRoutes } from './routes/portfolioRoutes.js';
 import { createWalletRoutes }    from './routes/walletRoutes.js';
 import { createBacktestRoutes }  from './routes/backtestRoutes.js';
+import { createPineScriptRoutes } from './routes/pineScriptRoutes.js';
 import { errorHandler }          from './middleware/errorHandler.js';
 
 import { setupSwagger }          from './swagger.js';
@@ -37,7 +38,15 @@ const exchange = binanceConfig.apiKey && binanceConfig.apiSecret
   ? new BinanceAdapter(binanceConfig.apiKey, binanceConfig.apiSecret)
   : null;
 
+// Live (production) exchange — useTestnet: false, use live API keys if configured
+const liveKey = binanceConfig.liveApiKey || binanceConfig.apiKey;
+const liveSecret = binanceConfig.liveApiSecret || binanceConfig.apiSecret;
+const exchangeLive = liveKey && liveSecret
+  ? new BinanceAdapter(liveKey, liveSecret, { useTestnet: false })
+  : null;
+
 const botManager = new BotManager(exchange, binanceConfig);
+botManager.setLiveExchange(exchangeLive);
 
 // ─── Multi-Fleet Orchestration ────────────────────────────────────────────────
 const portfolioManagers = new Map();
@@ -101,6 +110,7 @@ app.use('/api/config',    createConfigRoutes(botManager, portfolioManagers));
 app.use('/api/portfolio', createPortfolioRoutes(portfolioManagers, { botManager, exchange }));
 app.use('/api/wallet',    createWalletRoutes());
 app.use('/api/backtest', createBacktestRoutes(exchange));
+app.use('/api/pine-script', createPineScriptRoutes(exchange));
 
 
 // Backwards-compat aliases (legacy frontend calls these paths)

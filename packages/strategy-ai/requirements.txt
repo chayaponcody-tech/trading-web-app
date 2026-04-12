@@ -5,3 +5,6 @@ ta-lib
 ccxt
 requests
 python-dotenv
+optuna
+joblib
+vectorbt

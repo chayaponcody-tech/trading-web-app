@@ -13,6 +13,45 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
     return botManager.exchange;
   };
 
+  const getLiveService = () => {
+    if (!botManager.liveExchange) {
+      console.warn('[BinanceRoutes] liveExchange not initialized — falling back to testnet exchange. Set Live API keys in Configuration.');
+    }
+    return botManager.liveExchange || botManager.exchange;
+  };
+
+  // ─── Live (Production) Account Endpoints ─────────────────────────────────
+  r.get('/live/account', async (req, res) => {
+    try {
+      const cfg = loadBinanceConfig();
+      const hasLive = !!(cfg.liveApiKey && cfg.liveApiSecret);
+      if (!hasLive && !cfg.apiKey) {
+        return res.json({ assets: [], positions: [], error: 'Live API Keys not configured' });
+      }
+      const svc = getLiveService();
+      const [account, risk] = await Promise.all([
+        svc.getAccountInfo().catch(() => ({ assets: [], positions: [] })),
+        svc.getPositionRisk().catch(() => [])
+      ]);
+      const merged = (account.positions || []).map((p) => {
+        const rk = Array.isArray(risk) ? risk.find((r) => r.symbol === p.symbol) : null;
+        return { ...p, markPrice: rk?.markPrice, liquidationPrice: rk?.liquidationPrice };
+      });
+      res.json({ ...account, positions: merged });
+    } catch (e) {
+      res.status(200).json({ assets: [], positions: [], error: e.message });
+    }
+  });
+
+  r.get('/live/position-risk', async (req, res) => {
+    try {
+      const svc = getLiveService();
+      res.json(await svc.getPositionRisk());
+    } catch (e) {
+      res.json([]);
+    }
+  });
+
   r.get('/account', async (req, res) => {
     try {
       const cfg = loadBinanceConfig();
@@ -54,8 +93,8 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
 
   r.post('/close-manual', async (req, res, next) => {
     try {
-      const { symbol, type, quantity } = req.body;
-      const svc = getService();
+      const { symbol, type, quantity, isLive } = req.body;
+      const svc = isLive ? getLiveService() : getService();
       
       // 0. Fetch LIVE POSITION to get real Entry Price BEFORE closing
       const account = await svc.getAccountInfo().catch(() => ({ positions: [] }));

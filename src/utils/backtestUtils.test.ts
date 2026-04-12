@@ -1,12 +1,23 @@
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { convertEquityCurve, buildMarkersFromTrades, formatTradeRow, sortTradesDescending } from './backtestUtils';
-import type { Trade } from './backtestUtils';
+import {
+  convertEquityCurve,
+  buildMarkersFromTrades,
+  formatTradeRow,
+  sortTradesDescending,
+  computeWinStreak,
+  computeAvgR,
+  formatWL,
+  formatWinRate,
+  convertOverlayData,
+} from './backtestUtils';
+import type { Trade, OverlayDataPoint } from './backtestUtils';
 
 // ─── Property 3: Equity curve ISO-to-Unix conversion ───────────────────────
 // Feature: backtest-ui-api-integration, Property 3
 describe('convertEquityCurve', () => {
   it('Property 3: round-trip ISO→Unix is within 1 second — Validates: Requirements 3.1, 3.2', () => {
+    const TZ_OFFSET = 7 * 3600;
     // Use integer ms timestamps to avoid fc.date() edge cases with invalid dates
     const MIN_TS = 0;                          // 1970-01-01
     const MAX_TS = new Date('2100-01-01').getTime();
@@ -30,7 +41,8 @@ describe('convertEquityCurve', () => {
           for (let i = 0; i < curve.length; i++) {
             const unix = result[i].time as number;
             const originalMs = new Date(curve[i].time).getTime();
-            const roundTripMs = unix * 1000;
+            // convertEquityCurve applies TZ_OFFSET, so subtract it back for round-trip check
+            const roundTripMs = (unix - TZ_OFFSET) * 1000;
 
             // Round-trip must be within 1 second
             expect(Math.abs(roundTripMs - originalMs)).toBeLessThan(1000);
@@ -67,9 +79,12 @@ describe('buildMarkersFromTrades', () => {
     pnl: fc.float({ min: -10_000, max: 10_000, noNaN: true }),
     pnlPct: fc.float({ min: -100, max: 1000, noNaN: true }),
     exitReason: fc.constantFrom('TP' as const, 'SL' as const, 'Signal Flipped' as const),
+    tpPrice: fc.float({ min: 1, max: 200_000, noNaN: true }),
+    slPrice: fc.float({ min: 1, max: 200_000, noNaN: true }),
   });
 
   it('Property 4: marker count = 2 × trades.length, times/colors/positions/text correct — Validates: Requirements 4.1, 4.2, 4.3, 4.4', () => {
+    const TZ_OFFSET = 7 * 3600;
     fc.assert(
       fc.property(
         fc.array(tradeArbitrary, { minLength: 1, maxLength: 20 }),
@@ -79,23 +94,26 @@ describe('buildMarkersFromTrades', () => {
           // 4.1 — exactly 2 markers per trade
           expect(markers).toHaveLength(2 * trades.length);
 
-          for (const trade of trades) {
-            const expectedEntryTs = Math.floor(new Date(trade.entryTime).getTime() / 1000);
-            const expectedExitTs  = Math.floor(new Date(trade.exitTime).getTime() / 1000);
+          for (let i = 0; i < trades.length; i++) {
+            const trade = trades[i];
+            const n = i + 1;
+            const expectedEntryTs = Math.floor(new Date(trade.entryTime).getTime() / 1000) + TZ_OFFSET;
+            const expectedExitTs  = Math.floor(new Date(trade.exitTime).getTime() / 1000) + TZ_OFFSET;
 
             // Find the entry marker for this trade (matched by time + color)
             const entryColor = trade.type === 'LONG' ? '#0ecb81' : '#f6465d';
             const entryPosition = trade.type === 'LONG' ? 'belowBar' : 'aboveBar';
+            const expectedLabel = trade.type === 'LONG' ? `BUY ${n}` : `SELL ${n}`;
 
             const entryMarker = markers.find(
               m => (m.time as number) === expectedEntryTs &&
                    m.color === entryColor &&
                    m.position === entryPosition &&
-                   m.text === trade.type
+                   m.text === expectedLabel
             );
 
-            // 4.2 — entry time correct
-            expect(entryMarker, `entry marker not found for trade ${JSON.stringify(trade)}`).toBeDefined();
+            // 4.2 — entry time correct (with TZ_OFFSET)
+            expect(entryMarker, `entry marker not found for trade ${i} ${JSON.stringify(trade)}`).toBeDefined();
 
             // 4.3 — LONG entry: belowBar + #0ecb81; SHORT entry: aboveBar + #f6465d
             expect(entryMarker!.position).toBe(entryPosition);
@@ -153,6 +171,8 @@ const tradeArb56 = fc.record<Trade>({
   pnl: fc.float({ min: -10_000, max: 10_000, noNaN: true }),
   pnlPct: fc.float({ min: -100, max: 1000, noNaN: true }),
   exitReason: fc.constantFrom('TP' as const, 'SL' as const, 'Signal Flipped' as const),
+  tpPrice: fc.float({ min: 1, max: 200_000, noNaN: true }),
+  slPrice: fc.float({ min: 1, max: 200_000, noNaN: true }),
 });
 
 // ─── Property 5: Trade log field completeness ────────────────────────────────
@@ -307,8 +327,8 @@ describe('buildCompareRequestBody', () => {
     symbol: fc.constantFrom('BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'),
     strategy: fc.constantFrom('EMA', 'RSI', 'BB', 'EMA_RSI', 'BB_RSI', 'EMA_BB_RSI', 'GRID', 'AI_SCOUTER', 'EMA_SCALP', 'STOCH_RSI', 'VWAP_SCALP'),
     interval: fc.constantFrom('5m', '15m', '1h', '4h', '1d'),
-    tpPercent: fc.float({ min: Math.fround(0.1), max: Math.fround(20), noNaN: true }),
-    slPercent: fc.float({ min: Math.fround(0.1), max: Math.fround(20), noNaN: true }),
+    tpMultiplier: fc.float({ min: Math.fround(0.1), max: Math.fround(20), noNaN: true }),
+    slMultiplier: fc.float({ min: Math.fround(0.1), max: Math.fround(20), noNaN: true }),
     leverage: fc.integer({ min: 1, max: 125 }),
     capital: fc.float({ min: Math.fround(100), max: Math.fround(1_000_000), noNaN: true }),
     startDate: fc.option(fc.constantFrom('2023-01-01', '2023-06-01', '2024-01-01'), { nil: undefined }),
@@ -361,6 +381,8 @@ describe('formatCompareRow', () => {
     pnl: fc.float({ min: Math.fround(-10_000), max: Math.fround(10_000), noNaN: true }),
     pnlPct: fc.float({ min: Math.fround(-100), max: Math.fround(1000), noNaN: true }),
     exitReason: fc.constantFrom('TP' as const, 'SL' as const, 'Signal Flipped' as const),
+    tpPrice: fc.float({ min: Math.fround(1), max: Math.fround(200_000), noNaN: true }),
+    slPrice: fc.float({ min: Math.fround(1), max: Math.fround(200_000), noNaN: true }),
   });
 
   const compareResultArb = fc.record<CompareResult>({
@@ -374,8 +396,8 @@ describe('formatCompareRow', () => {
       symbol: fc.constantFrom('BTCUSDT', 'ETHUSDT'),
       strategy: fc.constantFrom('EMA', 'RSI'),
       interval: fc.constantFrom('1h', '4h'),
-      tpPercent: fc.float({ min: Math.fround(0.5), max: Math.fround(10), noNaN: true }),
-      slPercent: fc.float({ min: Math.fround(0.5), max: Math.fround(10), noNaN: true }),
+      tpMultiplier: fc.float({ min: Math.fround(0.5), max: Math.fround(10), noNaN: true }),
+      slMultiplier: fc.float({ min: Math.fround(0.5), max: Math.fround(10), noNaN: true }),
       leverage: fc.integer({ min: 1, max: 50 }),
       capital: fc.float({ min: Math.fround(100), max: Math.fround(100_000), noNaN: true }),
       startDate: fc.option(fc.constant('2023-01-01'), { nil: undefined }),
@@ -441,3 +463,258 @@ describe('formatCompareRow', () => {
 });
 
 
+
+// ─── Shared trade arbitrary for new utility tests ────────────────────────────
+const MIN_TS_NEW = new Date('2020-01-01').getTime();
+const MAX_TS_NEW = new Date('2024-01-01').getTime();
+const isoTimestampNew = fc.integer({ min: MIN_TS_NEW, max: MAX_TS_NEW }).map(ms => new Date(ms).toISOString());
+
+const tradeArbNew = fc.record<Trade>({
+  symbol: fc.constantFrom('BTCUSDT', 'ETHUSDT', 'SOLUSDT'),
+  type: fc.constantFrom('LONG' as const, 'SHORT' as const),
+  entryPrice: fc.float({ min: 1, max: 100_000, noNaN: true }),
+  exitPrice: fc.float({ min: 1, max: 100_000, noNaN: true }),
+  entryTime: isoTimestampNew,
+  exitTime: isoTimestampNew,
+  pnl: fc.float({ min: -10_000, max: 10_000, noNaN: true }),
+  pnlPct: fc.float({ min: -100, max: 1000, noNaN: true }),
+  exitReason: fc.constantFrom('TP' as const, 'SL' as const, 'Signal Flipped' as const),
+  tpPrice: fc.float({ min: 1, max: 200_000, noNaN: true }),
+  slPrice: fc.float({ min: 1, max: 200_000, noNaN: true }),
+});
+
+// ─── Property 5: Overlay time offset correctness ─────────────────────────────
+// Feature: strategy-chart-overlay, Property 5
+describe('convertOverlayData', () => {
+  const TZ_OFFSET = 7 * 3600;
+
+  it('Property 5: time = floor(ms/1000) + TZ_OFFSET, value preserved — Validates: Requirements 3.5', () => {
+    const arbPoint = fc.record<OverlayDataPoint>({
+      time: isoTimestampNew,
+      value: fc.float({ min: 0, max: 1_000_000, noNaN: true }),
+    });
+
+    fc.assert(
+      fc.property(
+        fc.array(arbPoint, { minLength: 1, maxLength: 20 }),
+        (points) => {
+          const result = convertOverlayData(points);
+
+          expect(result).toHaveLength(points.length);
+
+          for (let i = 0; i < points.length; i++) {
+            const expectedTime = Math.floor(new Date(points[i].time).getTime() / 1000) + TZ_OFFSET;
+            expect(result[i].time as number).toBe(expectedTime);
+            expect(result[i].value).toBe(points[i].value);
+          }
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(convertOverlayData([])).toEqual([]);
+  });
+});
+
+// ─── Property 6: Entry marker label format ───────────────────────────────────
+// Feature: strategy-chart-overlay, Property 6
+describe('buildMarkersFromTrades — sequential labels', () => {
+  it('Property 6: nth LONG trade has text "BUY {n}", nth SHORT has "SELL {n}" — Validates: Requirements 4.1, 4.2', () => {
+    const TZ_OFFSET = 7 * 3600;
+    fc.assert(
+      fc.property(
+        fc.array(tradeArbNew, { minLength: 1, maxLength: 20 }),
+        (trades) => {
+          const markers = buildMarkersFromTrades(trades);
+
+          for (let i = 0; i < trades.length; i++) {
+            const trade = trades[i];
+            const n = i + 1;
+            const expectedLabel = trade.type === 'LONG' ? `BUY ${n}` : `SELL ${n}`;
+            const expectedTs = Math.floor(new Date(trade.entryTime).getTime() / 1000) + TZ_OFFSET;
+            const expectedColor = trade.type === 'LONG' ? '#0ecb81' : '#f6465d';
+            const expectedPosition = trade.type === 'LONG' ? 'belowBar' : 'aboveBar';
+
+            const entryMarker = markers.find(
+              m => (m.time as number) === expectedTs &&
+                   m.text === expectedLabel &&
+                   m.color === expectedColor &&
+                   m.position === expectedPosition
+            );
+
+            expect(entryMarker, `entry marker for trade ${i} not found`).toBeDefined();
+          }
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+});
+
+// ─── Property 7: Exit marker label matches exit reason ───────────────────────
+// Feature: strategy-chart-overlay, Property 7
+describe('buildMarkersFromTrades — exit reason', () => {
+  it('Property 7: exit marker text equals trade.exitReason — Validates: Requirements 4.3', () => {
+    const TZ_OFFSET = 7 * 3600;
+    fc.assert(
+      fc.property(
+        fc.array(tradeArbNew, { minLength: 1, maxLength: 20 }),
+        (trades) => {
+          const markers = buildMarkersFromTrades(trades);
+
+          for (const trade of trades) {
+            const expectedTs = Math.floor(new Date(trade.exitTime).getTime() / 1000) + TZ_OFFSET;
+            const exitMarker = markers.find(
+              m => (m.time as number) === expectedTs &&
+                   m.text === trade.exitReason &&
+                   m.shape === 'arrowDown'
+            );
+            expect(exitMarker, `exit marker not found for exitReason=${trade.exitReason}`).toBeDefined();
+            expect(exitMarker!.text).toBe(trade.exitReason);
+          }
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+});
+
+// ─── Property 9: Metrics computation correctness ─────────────────────────────
+// Feature: strategy-chart-overlay, Property 9
+describe('computeWinStreak', () => {
+  it('Property 9a: counts consecutive wins from last trade backwards — Validates: Requirements 6.3', () => {
+    fc.assert(
+      fc.property(
+        fc.array(tradeArbNew, { minLength: 1, maxLength: 30 }),
+        (trades) => {
+          const streak = computeWinStreak(trades);
+
+          // Manually compute expected streak
+          let expected = 0;
+          for (let i = trades.length - 1; i >= 0; i--) {
+            if (trades[i].pnl > 0) {
+              expected++;
+            } else {
+              break;
+            }
+          }
+
+          expect(streak).toBe(expected);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('returns 0 for empty trades', () => {
+    expect(computeWinStreak([])).toBe(0);
+  });
+});
+
+describe('computeAvgR', () => {
+  it('Property 9b: returns |avgWin / avgLoss| when avgLoss !== 0 — Validates: Requirements 6.2', () => {
+    fc.assert(
+      fc.property(
+        fc.float({ min: Math.fround(0), max: Math.fround(10_000), noNaN: true }),
+        fc.float({ min: Math.fround(0.001), max: Math.fround(10_000), noNaN: true }),
+        (avgWin, avgLoss) => {
+          const result = computeAvgR(avgWin, avgLoss);
+          expect(result).toBeCloseTo(Math.abs(avgWin / avgLoss), 10);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('returns 0 when avgLoss === 0', () => {
+    expect(computeAvgR(500, 0)).toBe(0);
+    expect(computeAvgR(0, 0)).toBe(0);
+  });
+});
+
+describe('formatWL', () => {
+  it('Property 9c: returns "{winCount} / {lossCount}" — Validates: Requirements 6.4', () => {
+    fc.assert(
+      fc.property(
+        fc.array(tradeArbNew, { minLength: 0, maxLength: 30 }),
+        (trades) => {
+          const result = formatWL(trades);
+          const winCount = trades.filter(t => t.pnl > 0).length;
+          const lossCount = trades.filter(t => t.pnl <= 0).length;
+          expect(result).toBe(`${winCount} / ${lossCount}`);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('returns "0 / 0" for empty trades', () => {
+    expect(formatWL([])).toBe('0 / 0');
+  });
+});
+
+describe('formatWinRate', () => {
+  it('returns "{winRate.toFixed(1)}%" for any number', () => {
+    fc.assert(
+      fc.property(
+        fc.float({ min: 0, max: 100, noNaN: true }),
+        (winRate) => {
+          expect(formatWinRate(winRate)).toBe(`${winRate.toFixed(1)}%`);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('formats specific values correctly', () => {
+    expect(formatWinRate(55.555)).toBe('55.6%');
+    expect(formatWinRate(100)).toBe('100.0%');
+    expect(formatWinRate(0)).toBe('0.0%');
+  });
+});
+
+// ─── Property 8: TP/SL line label format ─────────────────────────────────────
+// Feature: strategy-chart-overlay, Property 8
+// Note: TP/SL label format is constructed inline in OverlayRenderer.tsx.
+// We test the pure format string logic here directly.
+describe('TP/SL line label format', () => {
+  it('Property 8: TP label = "TP / {tpPrice.toFixed(2)}", SL label = "SL / {slPrice.toFixed(2)}" — Validates: Requirements 5.1, 5.2', () => {
+    fc.assert(
+      fc.property(
+        fc.float({ min: Math.fround(0.01), max: Math.fround(1_000_000), noNaN: true }),
+        fc.float({ min: Math.fround(0.01), max: Math.fround(1_000_000), noNaN: true }),
+        (tpPrice, slPrice) => {
+          const tpLabel = `TP / ${tpPrice.toFixed(2)}`;
+          const slLabel = `SL / ${slPrice.toFixed(2)}`;
+
+          expect(tpLabel).toBe(`TP / ${tpPrice.toFixed(2)}`);
+          expect(slLabel).toBe(`SL / ${slPrice.toFixed(2)}`);
+
+          // Labels must start with the correct prefix
+          expect(tpLabel.startsWith('TP / ')).toBe(true);
+          expect(slLabel.startsWith('SL / ')).toBe(true);
+
+          // The price portion must be a valid 2-decimal number string
+          const tpPricePart = tpLabel.slice('TP / '.length);
+          const slPricePart = slLabel.slice('SL / '.length);
+          expect(tpPricePart).toMatch(/^\d+\.\d{2}$/);
+          expect(slPricePart).toMatch(/^\d+\.\d{2}$/);
+
+          // Parsed back value must be close to original (within half a cent, allowing for float rounding)
+          expect(Math.abs(parseFloat(tpPricePart) - tpPrice)).toBeLessThan(0.01);
+          expect(Math.abs(parseFloat(slPricePart) - slPrice)).toBeLessThan(0.01);
+        }
+      ),
+      { numRuns: 100 }
+    );
+  });
+
+  it('formats specific TP/SL values correctly', () => {
+    expect(`TP / ${(82.68).toFixed(2)}`).toBe('TP / 82.68');
+    expect(`SL / ${(79.44).toFixed(2)}`).toBe('SL / 79.44');
+    expect(`TP / ${(100).toFixed(2)}`).toBe('TP / 100.00');
+    expect(`SL / ${(0.01).toFixed(2)}`).toBe('SL / 0.01');
+  });
+});

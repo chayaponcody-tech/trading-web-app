@@ -1,5 +1,79 @@
 import json
+import logging
+import os
 import requests
+import numpy as np
+
+from logger import get_logger
+
+logger = get_logger("confidence-engine")
+
+
+class FeaturePipeline:
+    FEATURE_NAMES = ['rsi_14', 'ema20', 'ema50', 'ema_cross',
+                     'bb_position', 'volatility_20', 'momentum_10', 'atr_14']
+
+    def extract(self, closes: list[float], highs: list[float],
+                lows: list[float]) -> np.ndarray:
+        """Returns shape (8,) feature vector: [rsi_14, ema20, ema50, ema_cross,
+        bb_position, volatility_20, momentum_10, atr_14]"""
+        arr = np.array(closes, dtype=float)
+        highs_arr = np.array(highs, dtype=float)
+        lows_arr = np.array(lows, dtype=float)
+
+        # RSI 14
+        deltas = np.diff(arr)
+        gains = np.where(deltas > 0, deltas, 0.0)
+        losses = np.where(deltas < 0, -deltas, 0.0)
+        avg_gain = np.mean(gains[-14:]) if len(gains) >= 14 else 0.0
+        avg_loss = np.mean(losses[-14:]) if len(losses) >= 14 else 1e-9
+        rsi_14 = float(100 - (100 / (1 + avg_gain / (avg_loss + 1e-9))))
+
+        # EMA helper
+        def ema(data, period):
+            k = 2 / (period + 1)
+            result = [data[0]]
+            for v in data[1:]:
+                result.append(v * k + result[-1] * (1 - k))
+            return result
+
+        ema20 = float(ema(arr.tolist(), 20)[-1])
+        ema50 = float(ema(arr.tolist(), 50)[-1]) if len(arr) >= 50 else ema20
+        ema_cross = ema20 - ema50
+
+        # Bollinger Band position (20-period)
+        bb_window = arr[-20:]
+        bb_mean = np.mean(bb_window)
+        bb_std = np.std(bb_window)
+        bb_upper = bb_mean + 2 * bb_std
+        bb_lower = bb_mean - 2 * bb_std
+        price = arr[-1]
+        bb_position = float((price - bb_lower) / (bb_upper - bb_lower + 1e-9))
+
+        # Volatility: std of last 20 returns
+        returns = np.diff(arr[-21:]) / (arr[-21:-1] + 1e-9)
+        volatility_20 = float(np.std(returns)) if len(returns) > 0 else 0.0
+
+        # Momentum: price vs 10 candles ago
+        momentum_10 = float((price - arr[-10]) / (arr[-10] + 1e-9)) if len(arr) >= 10 else 0.0
+
+        # ATR 14
+        atr_14 = 0.0
+        if len(arr) >= 2 and len(highs_arr) >= 2 and len(lows_arr) >= 2:
+            n = min(len(arr), len(highs_arr), len(lows_arr))
+            h = highs_arr[:n]
+            l = lows_arr[:n]
+            c = arr[:n]
+            hl = h[1:] - l[1:]
+            hc = np.abs(h[1:] - c[:-1])
+            lc = np.abs(l[1:] - c[:-1])
+            tr = np.maximum(hl, np.maximum(hc, lc))
+            recent_tr = tr[-14:]
+            atr_14 = float(np.mean(recent_tr)) if len(recent_tr) > 0 else 0.0
+
+        return np.array([rsi_14, ema20, ema50, ema_cross,
+                         bb_position, volatility_20, momentum_10, atr_14],
+                        dtype=float)
 
 
 class ConfidenceEngine:
@@ -8,14 +82,43 @@ class ConfidenceEngine:
         self.openrouter_key = openrouter_key
         self.openrouter_model = openrouter_model
 
+        # ML model (optional)
+        self.model = None
+        model_path = os.environ.get("MODEL_PATH")
+        if model_path and os.path.exists(model_path):
+            try:
+                import joblib
+                self.model = joblib.load(model_path)
+                logger.info(f"Loaded ML model from {model_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load model: {e}")
+
+        self.pipeline = FeaturePipeline()
+
     def score(
         self,
         signal: str,
         features: dict,
         regime: str,
         strategy_metadata: dict,
+        closes: list[float] = None,
+        highs: list[float] = None,
+        lows: list[float] = None,
     ) -> tuple[float, str]:
         """Returns (confidence: float, reason: str) clamped to [0.0, 1.0]"""
+        # Delegate to ML model when loaded
+        if self.model is not None and closes is not None and len(closes) >= 50:
+            try:
+                feat_vec = self.pipeline.extract(
+                    closes,
+                    highs if highs is not None else closes,
+                    lows if lows is not None else closes,
+                )
+                ml_conf = self._ml_score(feat_vec)
+                return round(max(0.0, min(1.0, ml_conf)), 4), "[ML] predict_proba"
+            except Exception as e:
+                logger.error(f"[ConfidenceEngine] ML scoring failed, falling back to rule-based: {e}")
+
         confidence, reason = self._rule_based(signal, features, regime)
 
         if self.mode == "full" and 0.50 <= confidence <= 0.70:
@@ -25,6 +128,10 @@ class ConfidenceEngine:
                 reason = f"[ML+LLM] {llm_reason}"
 
         return round(max(0.0, min(1.0, confidence)), 4), reason
+
+    def _ml_score(self, features: np.ndarray) -> float:
+        """Call model.predict_proba and return positive class probability."""
+        return float(self.model.predict_proba(features.reshape(1, -1))[0][1])
 
     def _rule_based(self, signal: str, features: dict, regime: str) -> tuple[float, str]:
         """Rule-based confidence scoring — moved verbatim from main.py compute_confidence()"""

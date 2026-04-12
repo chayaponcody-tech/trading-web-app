@@ -76,6 +76,7 @@ export function initDb() {
         newParams TEXT,
         reasoning TEXT,
         marketCondition TEXT,
+        engine TEXT DEFAULT 'optuna',
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE IF NOT EXISTS telegram_logs (

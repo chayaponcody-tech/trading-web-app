@@ -9,10 +9,47 @@ export interface Trade {
   exitTime: string;
   pnl: number;
   pnlPct: number;
+  positionSize?: number;   // notional value including leverage (USDT)
   entryReason?: string;
   entryConfidence?: number | null;
-  exitReason: 'TP' | 'SL' | 'Signal Flipped';
+  exitReason: string;
+  tpPrice: number;
+  slPrice: number;
+  atr?: number | null;
+  regime?: string | null;
 }
+
+export interface OverlayDataPoint {
+  time: string;   // ISO 8601
+  value: number;
+}
+
+export interface OverlayData {
+  ema20?:    OverlayDataPoint[];
+  ema50?:    OverlayDataPoint[];
+  bbUpper?:  OverlayDataPoint[];
+  bbMiddle?: OverlayDataPoint[];
+  bbLower?:  OverlayDataPoint[];
+  rsi?:      OverlayDataPoint[];
+}
+
+export interface OverlayToggleState {
+  ema20: boolean;
+  ema50: boolean;
+  bb: boolean;
+  rsi: boolean;
+}
+
+export const OVERLAY_COLORS = {
+  ema20:    '#0ecb81',  // green
+  ema50:    '#f6a609',  // orange
+  bbUpper:  '#2196f3',  // blue dashed
+  bbMiddle: '#2196f3',  // blue solid
+  bbLower:  '#2196f3',  // blue dashed
+  rsi:      '#9c27b0',  // purple
+  tp:       '#0ecb81',  // green
+  sl:       '#f6465d',  // red
+} as const;
 
 export interface EquityCurvePoint {
   time: string;            // ISO 8601 from API
@@ -23,8 +60,10 @@ export interface BacktestConfig {
   symbol: string;
   strategy: string;
   interval: string;
-  tpPercent: number;
-  slPercent: number;
+  tpMultiplier: number;
+  slMultiplier: number;
+  trailMult?: number;
+  trailActivation?: number;
   leverage: number;
   capital: number;
   startDate?: string;
@@ -51,6 +90,7 @@ export interface BacktestResult {
   maxConsecutiveLosses: number;
   equityCurve: EquityCurvePoint[];
   trades: Trade[];
+  overlayData: OverlayData;
   createdAt: string;
 }
 
@@ -88,12 +128,16 @@ export function convertEquityCurve(curve: EquityCurvePoint[]): { time: Time; val
 /**
  * Builds trade markers from a trades array for use with lightweight-charts.
  * Produces exactly 2 markers per trade (entry + exit), sorted by time ascending.
+ * Entry markers use sequential labels: "BUY {n}" / "SELL {n}" (1-based).
+ * Both entry and exit timestamps include the UTC+7 TZ_OFFSET.
  */
 export function buildMarkersFromTrades(trades: Trade[]): SeriesMarker<Time>[] {
   const markers: SeriesMarker<Time>[] = [];
-  for (const trade of trades) {
-    const entryTs = Math.floor(new Date(trade.entryTime).getTime() / 1000) as Time;
-    const exitTs  = Math.floor(new Date(trade.exitTime).getTime() / 1000) as Time;
+  for (let i = 0; i < trades.length; i++) {
+    const trade = trades[i];
+    const n = i + 1;
+    const entryTs = (Math.floor(new Date(trade.entryTime).getTime() / 1000) + TZ_OFFSET) as Time;
+    const exitTs  = (Math.floor(new Date(trade.exitTime).getTime() / 1000) + TZ_OFFSET) as Time;
 
     // Entry marker
     markers.push({
@@ -101,7 +145,7 @@ export function buildMarkersFromTrades(trades: Trade[]): SeriesMarker<Time>[] {
       position: trade.type === 'LONG' ? 'belowBar' : 'aboveBar',
       color: trade.type === 'LONG' ? '#0ecb81' : '#f6465d',
       shape: 'arrowUp',
-      text: trade.type,
+      text: trade.type === 'LONG' ? `BUY ${n}` : `SELL ${n}`,
     });
 
     // Exit marker
@@ -122,8 +166,8 @@ export interface RunBacktestParams {
   symbol: string;
   strategy: string;
   interval: string;
-  tpPercent: number;
-  slPercent: number;
+  tpMultiplier: number;
+  slMultiplier: number;
   leverage: number;
   capital: number;
   startDate?: string;
@@ -141,8 +185,8 @@ export function buildBacktestConfig(params: RunBacktestParams): BacktestConfig {
     symbol: params.symbol,
     strategy: params.isPythonMode ? `PYTHON:${params.pythonStrategyName}` : params.strategy,
     interval: params.interval,
-    tpPercent: params.tpPercent,
-    slPercent: params.slPercent,
+    tpMultiplier: params.tpMultiplier,
+    slMultiplier: params.slMultiplier,
     leverage: params.leverage,
     capital: params.capital,
     ...(params.startDate ? { startDate: params.startDate } : {}),
@@ -288,4 +332,65 @@ export function formatCompareRow(result: CompareResult): CompareRow {
     row.error = result.error;
   }
   return row;
+}
+
+// ─── Metrics helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Counts consecutive winning trades (pnl > 0) counting backwards from the last trade.
+ */
+export function computeWinStreak(trades: Trade[]): number {
+  let streak = 0;
+  for (let i = trades.length - 1; i >= 0; i--) {
+    if (trades[i].pnl > 0) {
+      streak++;
+    } else {
+      break;
+    }
+  }
+  return streak;
+}
+
+/**
+ * Returns the average reward-to-risk ratio: |avgWin / avgLoss|.
+ * Returns 0 when avgLoss === 0 to avoid division by zero.
+ */
+export function computeAvgR(avgWin: number, avgLoss: number): number {
+  if (avgLoss === 0) return 0;
+  return Math.abs(avgWin / avgLoss);
+}
+
+/**
+ * Returns a formatted win/loss string: "{winCount} / {lossCount}".
+ */
+export function formatWL(trades: Trade[]): string {
+  const winCount = trades.filter(t => t.pnl > 0).length;
+  const lossCount = trades.filter(t => t.pnl <= 0).length;
+  return `${winCount} / ${lossCount}`;
+}
+
+/**
+ * Returns a formatted win rate string: "{winRate.toFixed(1)}%".
+ */
+export function formatWinRate(winRate: number): string {
+  return `${winRate.toFixed(1)}%`;
+}
+
+/**
+ * Converts an array of OverlayDataPoints to lightweight-charts time/value pairs.
+ * Applies the same UTC+7 TZ_OFFSET used by the candlestick series.
+ */
+export function convertOverlayData(points: OverlayDataPoint[]): { time: Time; value: number }[] {
+  return points.map(p => ({
+    time: (Math.floor(new Date(p.time).getTime() / 1000) + TZ_OFFSET) as Time,
+    value: p.value,
+  }));
+}
+
+/**
+ * Returns true when the leverage input should be visible for the given strategy.
+ * Leverage is hidden only for GRID strategy.
+ */
+export function isLeverageVisible(strategy: string): boolean {
+  return strategy !== 'GRID';
 }

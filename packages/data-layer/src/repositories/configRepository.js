@@ -18,6 +18,9 @@ export function loadBinanceConfig() {
     strategyAiMode: process.env.STRATEGY_AI_MODE || jsonConfig.strategyAiMode || 'off',
     strategyAiUrl: process.env.STRATEGY_AI_URL || jsonConfig.strategyAiUrl || 'http://strategy-ai:8000',
     strategyAiConfidenceThreshold: parseFloat(process.env.STRATEGY_AI_CONFIDENCE_THRESHOLD || jsonConfig.strategyAiConfidenceThreshold || 0.70),
+    // Live (production) Binance credentials — separate from testnet
+    liveApiKey: process.env.BINANCE_LIVE_API_KEY || jsonConfig.liveApiKey || '',
+    liveApiSecret: process.env.BINANCE_LIVE_API_SECRET || jsonConfig.liveApiSecret || '',
   };
 }
 

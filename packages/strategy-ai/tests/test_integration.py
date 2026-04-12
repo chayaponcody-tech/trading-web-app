@@ -125,14 +125,18 @@ def test_analyze_signal_backward_compat():
 # ---------------------------------------------------------------------------
 
 def test_strategy_list_returns_bb_breakout():
-    """GET /strategy/list returns a list containing 'bb_breakout'."""
+    """GET /strategy/list returns a list containing 'bb_breakout' with engine='python'."""
     response = client.get("/strategy/list")
     assert response.status_code == 200
 
     data = response.json()
     assert "strategies" in data
     assert isinstance(data["strategies"], list)
-    assert "bb_breakout" in data["strategies"]
+    keys = [s["key"] for s in data["strategies"]]
+    assert "bb_breakout" in keys
+    # All entries must have engine="python"
+    for entry in data["strategies"]:
+        assert entry["engine"] == "python"
 
 
 # ---------------------------------------------------------------------------

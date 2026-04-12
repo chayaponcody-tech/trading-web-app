@@ -5,6 +5,21 @@ import { getBacktestHistory, getBacktestById } from '../../../data-layer/src/rep
 export function createBacktestRoutes(exchange) {
   const router = express.Router();
 
+  // GET /strategies — proxy to strategy-ai service to list available strategies
+  router.get('/strategies', async (req, res) => {
+    try {
+      const { loadBinanceConfig } = await import('../../../data-layer/src/repositories/configRepository.js');
+      const { strategyAiUrl } = loadBinanceConfig();
+      const response = await fetch(`${strategyAiUrl}/strategy/list`);
+      if (!response.ok) throw new Error('Strategy AI service unavailable');
+      const data = await response.json();
+      res.json(data);
+    } catch (e) {
+      // Fallback to hardcoded list if Python service is down
+      res.json({ strategies: ['EMA', 'RSI', 'BB', 'EMA_RSI', 'BB_RSI', 'EMA_BB_RSI', 'GRID', 'AI_SCOUTER', 'EMA_SCALP', 'STOCH_RSI', 'VWAP_SCALP', 'OI_FUNDING_ALPHA'] });
+    }
+  });
+
   // GET / — fetch klines for chart preview (used by Backtest.tsx frontend)
   router.get('/', async (req, res) => {
     try {

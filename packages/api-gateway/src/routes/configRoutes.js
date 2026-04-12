@@ -18,17 +18,20 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
       strategyAiMode: cfg.strategyAiMode || 'off',
       strategyAiUrl: cfg.strategyAiUrl || 'http://strategy-ai:8000',
       strategyAiConfidenceThreshold: cfg.strategyAiConfidenceThreshold ?? 0.70,
+      // Live keys status
+      liveApiKey: cfg.liveApiKey ? '****' + cfg.liveApiKey.slice(-4) : '',
+      hasLiveKeys: !!(cfg.liveApiKey && cfg.liveApiSecret),
     });
   });
 
   r.post('/', async (req, res, next) => {
     try {
-      const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold } = req.body;
-      patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold });
+      const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, liveApiKey, liveApiSecret } = req.body;
+      patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, liveApiKey, liveApiSecret });
 
       const updated = loadBinanceConfig();
 
-      // Hot-swap exchange
+      // Hot-swap testnet exchange
       if (updated.apiKey && updated.apiSecret) {
         const newExchange = new BinanceAdapter(updated.apiKey, updated.apiSecret);
         botManager.setExchange(newExchange);
@@ -36,6 +39,15 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
           .then((rules) => botManager.setSymbolRules(rules))
           .catch(() => {});
       }
+
+      // Hot-swap live exchange
+      const liveKey = updated.liveApiKey || updated.apiKey;
+      const liveSecret = updated.liveApiSecret || updated.apiSecret;
+      if (liveKey && liveSecret) {
+        const newLiveExchange = new BinanceAdapter(liveKey, liveSecret, { useTestnet: false });
+        botManager.setLiveExchange(newLiveExchange);
+      }
+
       botManager.setConfig(updated);
 
       // Hot-swap Telegram NotificationService
@@ -50,6 +62,19 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
     } catch (e) { next(e); }
   });
 
+  // ─── Public IP ────────────────────────────────────────────────────────────
+  r.get('/my-ip', async (req, res) => {
+    try {
+      const response = await fetch('https://api.ipify.org?format=json');
+      const data = await response.json();
+      res.json({ ip: data.ip });
+    } catch (e) {
+      // Fallback: use request IP
+      const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
+      res.json({ ip: String(ip).split(',')[0].trim() });
+    }
+  });
+
   // ─── Strategy AI Health Check ─────────────────────────────────────────────
   r.get('/strategy-ai/status', async (req, res) => {
     try {
@@ -57,6 +82,35 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
       res.json(status);
     } catch (e) {
       res.json({ online: false, url: '', mode: 'off', lastCheck: new Date().toISOString() });
+    }
+  });
+
+  // ─── Strategy AI Log Level ────────────────────────────────────────────────
+  r.get('/strategy-ai/log-level', async (req, res) => {
+    try {
+      const { strategyAiUrl } = loadBinanceConfig();
+      const response = await fetch(`${strategyAiUrl}/admin/log-level`, { signal: AbortSignal.timeout(4000) });
+      const data = await response.json();
+      res.json(data);
+    } catch {
+      res.status(503).json({ error: 'Strategy AI service unavailable' });
+    }
+  });
+
+  r.post('/strategy-ai/log-level', async (req, res) => {
+    try {
+      const { level } = req.body;
+      const { strategyAiUrl } = loadBinanceConfig();
+      const response = await fetch(`${strategyAiUrl}/admin/log-level`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ level }),
+        signal: AbortSignal.timeout(4000),
+      });
+      const data = await response.json();
+      res.json(data);
+    } catch {
+      res.status(503).json({ error: 'Strategy AI service unavailable' });
     }
   });
 

@@ -176,16 +176,22 @@ export function saveSetting(key, value) {
 export function saveBotTuningLog(log) {
   if (useSqlite) {
     try {
+      // Add engine column if it doesn't exist yet (safe migration for existing DBs)
+      try {
+        db.prepare(`ALTER TABLE bot_tuning_history ADD COLUMN engine TEXT DEFAULT 'optuna'`).run();
+      } catch { /* column already exists — ignore */ }
+
       db.prepare(`
-        INSERT INTO bot_tuning_history (botId, symbol, oldParams, newParams, reasoning, marketCondition)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO bot_tuning_history (botId, symbol, oldParams, newParams, reasoning, marketCondition, engine)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
         log.botId,
         log.symbol,
         JSON.stringify(log.oldParams || {}),
         JSON.stringify(log.newParams || {}),
         log.reasoning,
-        log.marketCondition
+        log.marketCondition,
+        log.engine ?? 'optuna'
       );
       return true;
     } catch (e) {

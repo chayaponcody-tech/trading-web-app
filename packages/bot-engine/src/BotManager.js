@@ -1,4 +1,6 @@
 import { computeSignal, generateEntryReason, generateDiagnostic } from './SignalEngine.js';
+import { getPythonSignal } from './PythonStrategyClient.js';
+import { applySlippage, computePositionSize, computeATR, computeTPSL } from './Backtester.js';
 import { reflect } from '../../ai-agents/src/ReflectionAgent.js';
 import { reviewBot } from '../../ai-agents/src/ReviewerAgent.js';
 import { assessTrailingAdjustment } from '../../ai-agents/src/TrailingAIAgent.js';
@@ -23,6 +25,7 @@ export class BotManager {
    */
   constructor(exchange, config = {}) {
     this.exchange = exchange;
+    this.liveExchange = null;      // production exchange (no testnet)
     this.config = config;          // AI / provider config
     this.bots = new Map();         // botId → bot state
     this.timers = new Map();       // botId → intervalHandle
@@ -37,6 +40,7 @@ export class BotManager {
   setExchange(exchange) { this.exchange = exchange; }
   setConfig(config)     { this.config = config; }
   setSymbolRules(rules) { this.symbolRules = rules; }
+  setLiveExchange(ex)   { this.liveExchange = ex; }
 
   setNotificationService(service) {
     this.notificationService = service;
@@ -48,6 +52,20 @@ export class BotManager {
       if (bot.config.symbol.toUpperCase() === sym) return bot;
     }
     return null;
+  }
+
+  // ─── Exchange Selector ───────────────────────────────────────────────────────
+  /** Returns the correct exchange instance based on bot config */
+  _getExchange(bot) {
+    if (bot?.config?.exchange === 'binance_live' && this.liveExchange) {
+      return this.liveExchange;
+    }
+    return this.exchange;
+  }
+
+  /** Returns a log prefix indicating bot mode */
+  _mode(bot) {
+    return bot?.config?.exchange === 'binance_live' ? '🔴 [LIVE]' : '🟡 [TEST]';
   }
 
   // ─── Lifecycle ───────────────────────────────────────────────────────────────
@@ -224,7 +242,13 @@ export class BotManager {
 
   async _tick(botId) {
     const bot = this.bots.get(botId);
-    if (!bot || !bot.isRunning || !this.exchange) return;
+    if (!bot || !bot.isRunning) return;
+    const exchange = this._getExchange(bot);
+    if (!exchange) {
+      bot.currentThought = '⚠️ Exchange not configured — set API keys in Configuration';
+      bot.lastThoughtAt = new Date().toISOString();
+      return;
+    }
 
     const { symbol: rawSymbol, strategy, tpPercent, slPercent, leverage = 10,
             positionSizeUSDT = 100, aiCheckInterval = 30,
@@ -236,9 +260,9 @@ export class BotManager {
     try {
       // ── Fetch market data ──────────────────────────────────────────────────
       const [klines, ticker, accountInfo] = await Promise.all([
-        this.exchange.getKlines(symbol, interval, 250),
-        this.exchange.getTickerPrice(symbol),
-        this.exchange.getAccountInfo(),
+        this._getExchange(bot).getKlines(symbol, interval, 250),
+        this._getExchange(bot).getTickerPrice(symbol),
+        this._getExchange(bot).getAccountInfo(),
       ]);
 
       if (!Array.isArray(klines)) return;
@@ -336,10 +360,31 @@ export class BotManager {
           }
         }
 
-        if (tpPercent > 0 && pnlPct >= tpPercent) {
-          await this._closePosition(bot, pos, currPrice, `TP Hit (+${pnlPct.toFixed(2)}%)`);
-        } else if (slPercent > 0 && pnlPct <= -slPercent) {
-          await this._closePosition(bot, pos, currPrice, `SL Hit (${pnlPct.toFixed(2)}%)`);
+        // ── Dynamic ATR TP/SL (Feature #2) — takes priority over fixed % ──
+        if (pos.dynamicSl != null || pos.dynamicTp != null) {
+          const slHit = pos.dynamicSl != null && (
+            (pos.type === 'LONG'  && currPrice <= pos.dynamicSl) ||
+            (pos.type === 'SHORT' && currPrice >= pos.dynamicSl)
+          );
+          const tpHit = pos.dynamicTp != null && (
+            (pos.type === 'LONG'  && currPrice >= pos.dynamicTp) ||
+            (pos.type === 'SHORT' && currPrice <= pos.dynamicTp)
+          );
+          if (slHit) {
+            await this._closePosition(bot, pos, currPrice, `ATR SL Hit (${pnlPct.toFixed(2)}%)`);
+            continue;
+          }
+          if (tpHit) {
+            await this._closePosition(bot, pos, currPrice, `ATR TP Hit (+${pnlPct.toFixed(2)}%)`);
+            continue;
+          }
+        } else {
+          // Fallback: fixed percentage TP/SL from config
+          if (tpPercent > 0 && pnlPct >= tpPercent) {
+            await this._closePosition(bot, pos, currPrice, `TP Hit (+${pnlPct.toFixed(2)}%)`);
+          } else if (slPercent > 0 && pnlPct <= -slPercent) {
+            await this._closePosition(bot, pos, currPrice, `SL Hit (${pnlPct.toFixed(2)}%)`);
+          }
         }
       }
 
@@ -355,13 +400,36 @@ export class BotManager {
 
       if (bot.lastCandle !== lastCloseTime) {
         bot.lastCandle = lastCloseTime;
-        const signal = computeSignal(closes, strategy, bot.config);
+
+        // Route to Python service if strategy starts with PYTHON:
+        let signal;
+        if (strategy.startsWith('PYTHON:')) {
+          const stratKey = strategy.slice(7);
+          try {
+            const result = await getPythonSignal(stratKey, {
+              closes,
+              highs: klines.slice(0, -1).map(k => parseFloat(k[2])),
+              lows: klines.slice(0, -1).map(k => parseFloat(k[3])),
+              volumes: klines.slice(0, -1).map(k => parseFloat(k[5])),
+              params: bot.config,
+              symbol,
+            });
+            signal = result.signal;
+          } catch (e) {
+            console.error(`[Bot ${bot.id}] ${this._mode(bot)} Python signal error: ${e.message}`);
+            signal = 'NONE';
+          }
+        } else {
+          signal = computeSignal(closes, strategy, bot.config);
+        }
         bot.lastSignal = signal;
 
-        // Signal flip → exit current position
+        // ── Alpha Decay Exit (Feature #4) ─────────────────────────────────
+        // Close immediately on opposite signal OR significant confidence drop
         for (const pos of [...bot.openPositions]) {
-          if (signal !== 'NONE' && signal !== pos.type) {
-            await this._closePosition(bot, pos, currPrice, 'Signal Flipped');
+          const isOpposite = signal !== 'NONE' && signal !== pos.type;
+          if (isOpposite) {
+            await this._closePosition(bot, pos, currPrice, 'Alpha Decay: Signal Flipped');
           }
         }
 
@@ -377,18 +445,38 @@ export class BotManager {
               if (!aiResult.approved) {
                 bot.currentThought = `🤖 [Strategy AI Block] ${aiResult.reason}`;
                 bot.lastThoughtAt = new Date().toISOString();
-                console.log(`[Bot ${botId}] Entry blocked by Strategy AI: ${aiResult.reason}`);
+                console.log(`[Bot ${botId}] ${this._mode(bot)} Entry blocked by Strategy AI: ${aiResult.reason}`);
               } else {
                 bot.currentThought = `🤖 [Strategy AI OK] confidence=${(aiResult.confidence * 100).toFixed(0)}% — ${aiResult.reason}`;
                 bot.lastThoughtAt = new Date().toISOString();
                 bot._pendingPythonStoploss = aiResult.stoploss;
+                bot._pendingAtrValue = aiResult.atrValue;
+                bot._pendingRegime   = aiResult.regime;
                 await this._openPosition(bot, signal, currPrice, closes);
-                if (bot._pendingPythonStoploss != null && bot.openPositions.length > 0) {
-                  const pos = bot.openPositions.at(-1);
-                  pos.pythonStoploss = bot._pendingPythonStoploss;
-                  pos.entryReason = (pos.entryReason || '') + ` | SL=${bot._pendingPythonStoploss.toFixed(4)}`;
+                if (bot.openPositions.length > 0) {
+                  const pos    = bot.openPositions.at(-1);
+                  const atr    = bot._pendingAtrValue ?? null;
+                  const regime = bot._pendingRegime   ?? null;
+
+                  // ── Dynamic ATR-based TP/SL (Feature #2) ──────────────────
+                  if (atr && atr > 0) {
+                    const slMult = bot.config.atrSlMultiplier ?? 2.0;
+                    const tpMult = bot.config.atrTpMultiplier ?? 3.0;
+                    const ep = pos.entryPrice;
+                    pos.dynamicSl = pos.type === 'LONG' ? ep - atr * slMult : ep + atr * slMult;
+                    pos.dynamicTp = pos.type === 'LONG' ? ep + atr * tpMult : ep - atr * tpMult;
+                    pos.atrValue  = atr;
+                    pos.regime    = regime;
+                    pos.entryReason = (pos.entryReason || '') +
+                      ` | ATR=${atr.toFixed(4)} SL=${pos.dynamicSl.toFixed(4)} TP=${pos.dynamicTp.toFixed(4)} regime=${regime}`;
+                  } else if (bot._pendingPythonStoploss != null) {
+                    pos.pythonStoploss = bot._pendingPythonStoploss;
+                    pos.entryReason = (pos.entryReason || '') + ` | SL=${bot._pendingPythonStoploss.toFixed(4)}`;
+                  }
                 }
                 delete bot._pendingPythonStoploss;
+                delete bot._pendingAtrValue;
+                delete bot._pendingRegime;
               }
             } else {
               // strategyAiMode = 'off' → still run lightweight microstructure check in JS
@@ -410,15 +498,18 @@ export class BotManager {
       this._syncStats(bot);
       this._save();
     } catch (err) {
-      console.error(`[Bot ${botId}] Tick error:`, err.message);
+      console.error(`[Bot ${botId}] ${this._mode(bot)} Tick error:`, err.message);
+      bot.currentThought = `❌ Error: ${err.message.slice(0, 80)}`;
+      bot.lastThoughtAt = new Date().toISOString();
       if (err.message.includes('-2015') || err.message.includes('-2008') || err.message.includes('API-key')) {
-        console.warn(`[Bot ${botId}] AUTO-PAUSED due to Invalid API Keys.`);
+        console.warn(`[Bot ${botId}] ${this._mode(bot)} AUTO-PAUSED due to Invalid API Keys.`);
         bot.isRunning = false;
+        bot.currentThought = '🔑 Stopped — Invalid API Key. Please update keys in Configuration.';
         bot.aiReason = 'Stopped automatically due to Invalid API Keys. Please update Demo Keys.';
         this._save();
       }
       if (err.message.includes('-1121')) {
-        console.warn(`[Bot ${botId}] AUTO-PAUSED: Invalid symbol ${bot.config.symbol}.`);
+        console.warn(`[Bot ${botId}] ${this._mode(bot)} AUTO-PAUSED: Invalid symbol ${bot.config.symbol}.`);
         bot.isRunning = false;
         bot.aiReason = `Stopped: Invalid symbol "${bot.config.symbol}" on Binance Futures.`;
         this._save();
@@ -469,15 +560,22 @@ export class BotManager {
 
     // Set leverage on exchange before placing any orders
     try {
-      await this.exchange.setLeverage(symbol, leverage);
+      await this._getExchange(bot).setLeverage(symbol, leverage);
     } catch (e) {
       console.warn(`[Bot ${bot.id}] setLeverage failed:`, e.message);
     }
 
     // Handle position sizing based on current equity (Safety Lock & Dynamic Sizing)
-    let tradeValue = posValue;
+    // Use VolatilityPositionSizer (ATR-based) to determine tradeValue (Requirement 4.5)
+    const klines = bot._lastKlines || [];
+    const closedKlines = klines.slice(0, -1);
+    const allHighs  = closedKlines.map(k => parseFloat(k[2]));
+    const allLows   = closedKlines.map(k => parseFloat(k[3]));
+    const allCloses = closedKlines.map(k => parseFloat(k[4]));
+    let tradeValue = computePositionSize(bot.equity, allHighs, allLows, allCloses, { leverage });
+
+    // Safety Lock: cap at equity, and guard against critically low equity
     if (tradeValue > bot.equity) {
-      // Critical threshold: if less than 5 USDT remains, stop the bot to prevent meaningless trades
       if (bot.equity < 5) {
         const msg = `CRITICAL FUND LOSS: Only ${bot.equity.toFixed(2)} USDT remains. Stopping for protection.`;
         console.warn(`[Bot ${bot.id}] ${msg}`);
@@ -485,9 +583,7 @@ export class BotManager {
         this.stopBot(bot.id);
         return;
       }
-      
-      // Dynamic scaling: trade with whatever is left (e.g. 95 instead of 100)
-      console.log(`[Bot ${bot.id}] Adjusting trade size from ${posValue} to ${bot.equity.toFixed(2)} USDT (Reason: Net PnL Drawdown)`);
+      console.log(`[Bot ${bot.id}] Adjusting trade size from ${tradeValue.toFixed(2)} to ${bot.equity.toFixed(2)} USDT (Reason: Net PnL Drawdown)`);
       tradeValue = bot.equity;
     }
 
@@ -525,20 +621,41 @@ export class BotManager {
       const qtyStr = stepQty.toFixed(rule.precision || 3);
       
       if (s.type === 'MARKET') {
-        const orderRes = await this.exchange.placeOrder(
+        const orderRes = await this._getExchange(bot).placeOrder(
           symbol,
           signal === 'LONG' ? 'BUY' : 'SELL',
           'MARKET',
           qtyStr
         );
-        bot.openPositions.push({
+        // Apply slippage to entry price for accurate PnL tracking (Requirement 3.7)
+        const effectiveEntryPrice = applySlippage(currPrice, signal, 'open');
+
+        // Compute ATR-based dynamic TP/SL (Phase 5 — task 5.3)
+        const tpMultiplier = bot.config.tpMultiplier ?? 2.0;
+        const slMultiplier = bot.config.slMultiplier ?? 1.0;
+        const posAtr = computeATR(allHighs, allLows, allCloses);
+        const tpsl = computeTPSL(effectiveEntryPrice, signal, posAtr, { tpMultiplier, slMultiplier });
+
+        const newPos = {
           id: `pos_mkt_${Date.now()}_${Math.random().toString(36).slice(2,5)}`,
           type: signal,
-          entryPrice: currPrice,
+          entryPrice: effectiveEntryPrice,
           entryTime: new Date().toISOString(),
           entryReason: `${bot.config.strategy} - AI Step (Market ${s.weightPct}%)`,
           quantity: parseFloat(qtyStr),
-        });
+        };
+
+        if (tpsl) {
+          // ATR-based TP/SL available
+          newPos.dynamicTp = tpsl.tp;
+          newPos.dynamicSl = tpsl.sl;
+          newPos.atrValue  = posAtr;
+          newPos.entryReason += ` | ATR=${posAtr.toFixed(4)} TP=${tpsl.tp.toFixed(4)} SL=${tpsl.sl.toFixed(4)}`;
+        }
+        // When tpsl is null (ATR=0), dynamicTp/dynamicSl remain undefined →
+        // the tick loop falls back to fixed-% TP/SL from bot.config.tpPercent/slPercent
+
+        bot.openPositions.push(newPos);
       } else {
         // LIMIT Order
         let rawLimitPrice = signal === 'LONG' 
@@ -554,7 +671,7 @@ export class BotManager {
         const limitPriceStr = roundedLimitPrice.toFixed(pricePrecision);
 
         try {
-          await this.exchange.placeOrder(
+          await this._getExchange(bot).placeOrder(
             symbol,
             signal === 'LONG' ? 'BUY' : 'SELL',
             'LIMIT',
@@ -563,7 +680,7 @@ export class BotManager {
           );
           console.log(`[Bot ${bot.id}] AI Step (Limit ${s.weightPct}%) Placed at ${limitPriceStr}`);
         } catch (e) {
-          console.error(`[Bot ${bot.id}] AI Limit Step Error:`, e.message);
+          console.error(`[Bot ${bot.id}] ${this._mode(bot)} AI Limit Step Error:`, e.message);
         }
       }
     }
@@ -578,19 +695,22 @@ export class BotManager {
   async _closePosition(bot, pos, currPrice, reason) {
     try {
       const symbol = bot.config.symbol.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
-      await this.exchange.closePosition(symbol, pos.type, pos.quantity);
+      await this._getExchange(bot).closePosition(symbol, pos.type, pos.quantity);
       bot.openPositions = bot.openPositions.filter((p) => p.id !== pos.id);
 
+      // Apply slippage to exit price for accurate PnL calculation (Requirement 3.7)
+      const effectiveExitPrice = applySlippage(currPrice, pos.type, 'close');
+
       const pnl = (pos.type === 'LONG'
-        ? (currPrice - pos.entryPrice)
-        : (pos.entryPrice - currPrice)) * (pos.quantity || 0);
+        ? (effectiveExitPrice - pos.entryPrice)
+        : (pos.entryPrice - effectiveExitPrice)) * (pos.quantity || 0);
 
       const trade = {
         botId: bot.id,
         type: pos.type,
         symbol: bot.config.symbol,
         entryPrice: pos.entryPrice,
-        exitPrice: currPrice,
+        exitPrice: effectiveExitPrice,
         pnl,
         reason,
         exitTime: new Date().toISOString(),
@@ -631,7 +751,7 @@ export class BotManager {
           this.notificationService.notifyTrade(bot, trade);
       }
     } catch (e) {
-      console.error(`[Bot ${bot.id}] Close error:`, e.message);
+      console.error(`[Bot ${bot.id}] ${this._mode(bot)} Close error:`, e.message);
       if (e.message.includes('No open position')) {
         bot.openPositions = bot.openPositions.filter((p) => p.id !== pos.id);
       }
@@ -752,8 +872,8 @@ export class BotManager {
   async _checkMicrostructure(bot, symbol, signal) {
     try {
       const [fundingData, oiHistory] = await Promise.all([
-        this.exchange.getFundingRate(symbol).catch(() => null),
-        this.exchange.getOpenInterestStatistics(symbol, '15m', 3).catch(() => []),
+        this._getExchange(bot).getFundingRate(symbol).catch(() => null),
+        this._getExchange(bot).getOpenInterestStatistics(symbol, '15m', 3).catch(() => []),
       ]);
 
       const funding = fundingData?.lastFundingRate ?? 0;
@@ -839,9 +959,8 @@ export class BotManager {
 
     const url          = this.config.strategyAiUrl || 'http://strategy-ai:8000';
     const threshold    = this.config.strategyAiConfidenceThreshold ?? 0.70;
-    const strategyName = bot.config.strategyName;
-
-    const useNewEndpoint = strategyName;
+    const strategyName = bot.config.strategyName || bot.config.strategy;
+    const useNewEndpoint = !!(strategyName && strategyName !== 'undefined');
     const endpoint = useNewEndpoint ? '/strategy/analyze' : '/analyze-signal';
 
     const klines = bot._lastKlines || [];
@@ -851,8 +970,8 @@ export class BotManager {
     let oiChangePct = null;
     try {
       const [fundingData, oiHistory] = await Promise.all([
-        this.exchange.getFundingRate(bot.config.symbol).catch(() => null),
-        this.exchange.getOpenInterestStatistics(bot.config.symbol, '15m', 3).catch(() => []),
+        this._getExchange(bot).getFundingRate(bot.config.symbol).catch(() => null),
+        this._getExchange(bot).getOpenInterestStatistics(bot.config.symbol, '15m', 3).catch(() => []),
       ]);
       fundingRate = fundingData?.lastFundingRate ?? null;
       if (Array.isArray(oiHistory) && oiHistory.length >= 2) {
@@ -862,6 +981,26 @@ export class BotManager {
       }
     } catch (e) {
       console.warn(`[Bot ${bot.id}] Could not fetch microstructure data: ${e.message}`);
+    }
+
+    // For OI_FUNDING_ALPHA: fetch full OI + funding history arrays
+    let oiArray = [];
+    let fundingArray = [];
+    if (strategyName === 'OI_FUNDING_ALPHA') {
+      try {
+        const oiHistFull = await this._getExchange(bot)
+          .getOpenInterestStatistics(bot.config.symbol, '15m', 100)
+          .catch(() => []);
+        oiArray = oiHistFull.map(d => parseFloat(d.sumOpenInterest));
+
+        // funding_rate is a single scalar per 8h — replicate it across the OI array length
+        // as a proxy until historical funding endpoint is available
+        if (fundingRate !== null && oiArray.length > 0) {
+          fundingArray = Array(oiArray.length).fill(fundingRate);
+        }
+      } catch (e) {
+        console.warn(`[Bot ${bot.id}] OI_FUNDING_ALPHA: could not fetch OI history: ${e.message}`);
+      }
     }
 
     const payload = useNewEndpoint
@@ -876,6 +1015,10 @@ export class BotManager {
           funding_rate:       fundingRate,
           oi_change_pct:      oiChangePct,
           funding_threshold:  bot.config.fundingThreshold ?? 0.0005,
+          params: {
+            ...(oiArray.length > 0 && { oi: oiArray, funding_rates: fundingArray }),
+            window: bot.config.oiFundingWindow ?? 5,
+          },
         }
       : { symbol: bot.config.symbol, signal, mode: this.config.strategyAiMode || 'ml', closes: closes.slice(-60) };
 
@@ -908,13 +1051,16 @@ export class BotManager {
       console.log(
         `[Bot ${bot.id}] 🐍 strategy=${data.strategy ?? strategyName} ` +
         `signal=${data.signal} confidence=${(confidence * 100).toFixed(0)}% ` +
+        `regime=${data.regime ?? 'N/A'} atr=${data.atr_value ?? 'N/A'} ` +
         `stoploss=${data.stoploss ?? 'N/A'}`
       );
 
       return {
         approved,
         confidence,
-        stoploss: data.stoploss ?? null,
+        stoploss:  data.stoploss   ?? null,
+        atrValue:  data.atr_value  ?? null,
+        regime:    data.regime     ?? null,
         reason: data.reason || `confidence=${(confidence * 100).toFixed(0)}%`,
       };
     } catch (e) {
@@ -949,7 +1095,7 @@ export class BotManager {
 
     let accountInfo;
     try {
-      accountInfo = await this.exchange.getAccountInfo();
+      accountInfo = await this._getExchange(bot).getAccountInfo();
     } catch (e) {
       console.error('[BotManager] reattachOrphanPositions: getAccountInfo failed:', e.message);
       return;
@@ -1073,13 +1219,45 @@ export class BotManager {
     const bot = this.bots.get(botId);
     if (!bot || !bot.openPositions || bot.openPositions.length === 0) return;
 
-    const trailingPct = parseFloat(bot.config.trailingStopPct || 0);
-    const activationPct = parseFloat(bot.config.trailingActivationPct || 1.0);
-
-    if (trailingPct <= 0) return;
-
     for (const pos of bot.openPositions) {
       const isLong = pos.type === 'LONG';
+
+      // ── ATR-based Chandelier Trailing Stop (Feature #3) ───────────────────
+      if (pos.atrValue && pos.atrValue > 0) {
+        // Regime-switching trailing distance
+        const regime = pos.regime ?? 'ranging';
+        const trailMult = (regime === 'trending_up' || regime === 'trending_down') ? 3.0 : 1.5;
+        const trailDist = pos.atrValue * trailMult;
+
+        if (isLong) {
+          pos.highestPrice = Math.max(pos.highestPrice || pos.entryPrice, currentPrice);
+          const newSl = pos.highestPrice - trailDist;
+          if (!pos.trailingSl || newSl > pos.trailingSl) {
+            pos.trailingSl = newSl;
+            console.log(
+              `[Bot ${botId}] 📈 ATR Trail ↑ ${newSl.toFixed(4)} ` +
+              `(peak: ${pos.highestPrice.toFixed(4)}, ATR×${trailMult} regime=${regime})`
+            );
+          }
+        } else {
+          pos.lowestPrice = Math.min(pos.lowestPrice || pos.entryPrice, currentPrice);
+          const newSl = pos.lowestPrice + trailDist;
+          if (!pos.trailingSl || newSl < pos.trailingSl) {
+            pos.trailingSl = newSl;
+            console.log(
+              `[Bot ${botId}] 📉 ATR Trail ↓ ${newSl.toFixed(4)} ` +
+              `(trough: ${pos.lowestPrice.toFixed(4)}, ATR×${trailMult} regime=${regime})`
+            );
+          }
+        }
+        continue; // skip legacy % trailing for this position
+      }
+
+      // ── Legacy fixed-% trailing (fallback when no ATR available) ──────────
+      const trailingPct    = parseFloat(bot.config.trailingStopPct || 0);
+      const activationPct  = parseFloat(bot.config.trailingActivationPct || 1.0);
+      if (trailingPct <= 0) continue;
+
       const entryPrice = parseFloat(pos.entryPrice);
       const pnlPct = isLong
         ? ((currentPrice - entryPrice) / entryPrice) * 100
@@ -1143,3 +1321,5 @@ export class BotManager {
     }
   }
 }
+
+

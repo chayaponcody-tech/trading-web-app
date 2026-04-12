@@ -10,10 +10,10 @@ const USE_TESTNET = process.env.BINANCE_USE_TESTNET !== 'false';
  * This is the single source of truth for Binance API.
  */
 export class BinanceAdapter extends BaseExchange {
-  constructor(apiKey, apiSecret) {
+  constructor(apiKey, apiSecret, { useTestnet = USE_TESTNET } = {}) {
     super(apiKey, apiSecret);
 
-    console.log(`[BinanceAdapter] Initializing with API Key: ${this.apiKey ? this.apiKey.substring(0, 5) + '***' : 'NONE'} | Secret: ${this.apiSecret ? 'SET' : 'MISSING'}`);
+    console.log(`[BinanceAdapter] Initializing with API Key: ${this.apiKey ? this.apiKey.substring(0, 5) + '***' : 'NONE'} | Secret: ${this.apiSecret ? 'SET' : 'MISSING'} | Mode: ${useTestnet ? 'TESTNET' : 'LIVE PRODUCTION'} ⚡`);
     
     // Initialize CCXT Binance client with default Futures options
     const exchangeOptions = {
@@ -33,7 +33,7 @@ export class BinanceAdapter extends BaseExchange {
     this.client = new ccxt.binanceusdm(exchangeOptions);
     this.publicClient = new ccxt.binanceusdm({ ...exchangeOptions, apiKey: undefined, secret: undefined });
 
-    if (USE_TESTNET) {
+    if (useTestnet) {
       const demoDomain = 'demo-fapi.binance.com';
       
       const overrideUrls = (ex) => {

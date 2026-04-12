@@ -1,25 +1,47 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare, Layers } from 'lucide-react';
+import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare, Layers, Brain, TrendingUp, Search, Wallet, FileCode } from 'lucide-react';
 import './App.css';
+
+const sectionLabel = (text: string) => (
+  <div style={{ fontSize: '0.58rem', color: 'var(--text-muted)', letterSpacing: '1px', padding: '0.6rem 0.75rem 0.1rem', textTransform: 'uppercase' }}>{text}</div>
+);
+
+const sectionDivider = () => (
+  <div style={{ borderTop: '1px solid var(--border-color)', marginTop: '0.25rem', paddingTop: '0.1rem' }} />
+);
 
 function Sidebar() {
   const location = useLocation();
+
+  const NavLink = ({ item }: { item: { path: string; name: string; icon: React.ReactNode } }) => (
+    <Link to={item.path} className={`nav-link ${location.pathname === item.path ? 'active' : ''}`}>
+      {item.icon}<span>{item.name}</span>
+    </Link>
+  );
+
   const cryptoItems = [
     { path: '/portfolio', name: 'AI Portfolio (PORT)', icon: <ShieldCheck size={20} color="#00d1ff" /> },
     { path: '/binance-live', name: 'Binance (Live Sim)', icon: <Bot size={20} color="#faad14" /> },
+    { path: '/binance-real', name: 'Binance (Live 🔴)', icon: <Bot size={20} color="#f6465d" /> },
     { path: '/backtest', name: 'Backtest (ทดสอบ)', icon: <FlaskConical size={20} /> },
   ];
-  const bottomItems = [
+
+  const predictionItems = [
+    { path: '/polymarket', name: 'Polymarket', icon: <TrendingUp size={20} color="#ff6b35" /> },
+    { path: '/markets-browser', name: 'Markets Browser', icon: <Search size={20} color="#ff6b35" /> },
+    { path: '/my-bets', name: 'My Bets', icon: <Wallet size={20} color="#ff6b35" /> },
+  ];
+
+  const intelligenceItems = [
+    { path: '/sentiment', name: 'Sentiment Analysis', icon: <Brain size={20} color="#a78bfa" /> },
+    { path: '/pine-import', name: 'Pine Import', icon: <FileCode size={20} color="#a78bfa" /> },
+  ];
+
+  const systemItems = [
     { path: '/strategies', name: 'ภาพรวมระบบ', icon: <Layers size={20} /> },
     { path: '/logs', name: 'บันทึก (Logs)', icon: <Terminal size={20} /> },
     { path: '/telegram-logs', name: 'Telegram Logs', icon: <MessageSquare size={20} color="#0088cc" /> },
   ];
-
-  const NavLink = ({ item }: { item: { path: string; name: string; icon: React.ReactNode } }) => (
-    <Link key={item.path} to={item.path} className={`nav-link ${location.pathname === item.path ? 'active' : ''}`}>
-      {item.icon}<span>{item.name}</span>
-    </Link>
-  );
 
   return (
     <nav className="sidebar glass-panel">
@@ -30,12 +52,20 @@ function Sidebar() {
         </Link>
       </div>
       <div className="nav-links">
-        <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', letterSpacing: '1px', padding: '0.5rem 0.75rem 0.1rem', textTransform: 'uppercase' }}>── CRYPTO ──</div>
+        {sectionLabel('── CRYPTO ──')}
         {cryptoItems.map(item => <NavLink key={item.path} item={item} />)}
-        
-        <div style={{ borderTop: '1px solid var(--border-color)', marginTop: '0.5rem', paddingTop: '0.5rem' }}>
-          {bottomItems.map(item => <NavLink key={item.path} item={item} />)}
-        </div>
+
+        {sectionDivider()}
+        {sectionLabel('── PREDICTION ──')}
+        {predictionItems.map(item => <NavLink key={item.path} item={item} />)}
+
+        {sectionDivider()}
+        {sectionLabel('── INTELLIGENCE ──')}
+        {intelligenceItems.map(item => <NavLink key={item.path} item={item} />)}
+
+        {sectionDivider()}
+        {sectionLabel('── SYSTEM ──')}
+        {systemItems.map(item => <NavLink key={item.path} item={item} />)}
       </div>
     </nav>
   );
@@ -62,9 +92,15 @@ import Strategies from './pages/Strategies';
 import Logs from './pages/Logs';
 import Backtest from './pages/Backtest';
 import BinanceLive from './pages/BinanceLive';
+import BinanceLiveReal from './pages/BinanceLiveReal';
 import ConfigPage from './pages/Config';
 import Portfolio from './pages/Portfolio';
 import TelegramLogs from './pages/TelegramLogs';
+import Sentiment from './pages/Sentiment';
+import Polymarket from './pages/Polymarket';
+import MarketsBrowser from './pages/MarketsBrowser';
+import MyBets from './pages/MyBets';
+import PineImport from './pages/PineImport';
 
 function App() {
   return (
@@ -77,10 +113,16 @@ function App() {
             <Route path="/" element={<Portfolio />} />
             <Route path="/portfolio" element={<Portfolio />} />
             <Route path="/binance-live" element={<BinanceLive />} />
+            <Route path="/binance-real" element={<BinanceLiveReal />} />
             <Route path="/backtest" element={<Backtest />} />
             <Route path="/strategies" element={<Strategies />} />
             <Route path="/logs" element={<Logs />} />
             <Route path="/telegram-logs" element={<TelegramLogs />} />
+            <Route path="/sentiment" element={<Sentiment />} />
+            <Route path="/polymarket" element={<Polymarket />} />
+            <Route path="/markets-browser" element={<MarketsBrowser />} />
+            <Route path="/my-bets" element={<MyBets />} />
+            <Route path="/pine-import" element={<PineImport />} />
             <Route path="/config" element={<ConfigPage />} />
           </Routes>
         </main>

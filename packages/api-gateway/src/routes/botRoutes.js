@@ -212,6 +212,33 @@ export function createBotRoutes(botManager) {
     } catch (e) { next(e); }
   });
 
+  /**
+   * @swagger
+   * /api/forward-test/tuning-history:
+   *   get:
+   *     summary: Get parameter tuning history with engine info (optuna vs vectorbt)
+   *     tags: [Bots]
+   *     parameters:
+   *       - in: query
+   *         name: limit
+   *         schema: { type: integer, default: 50 }
+   */
+  r.get('/tuning-history', (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit) || 50;
+      const rows = getTuningHistory(limit);
+      const parsed = rows.map(r => ({
+        ...r,
+        oldParams: JSON.parse(r.oldParams || '{}'),
+        newParams: JSON.parse(r.newParams || '{}'),
+        engine: r.engine ?? 'optuna',
+      }));
+      res.json(parsed);
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   return r;
 }
 

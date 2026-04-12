@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fc from 'fast-check';
-import { getPythonSignal, clearCache } from '../PythonStrategyClient.js';
+import { getPythonSignal, getBatchSignals, clearCache } from '../PythonStrategyClient.js';
 
 beforeEach(() => {
   clearCache();
@@ -106,5 +106,64 @@ describe('Property 13: Python Strategy Response Caching (Idempotence)', () => {
       ),
       { numRuns: 100 }
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit tests for getBatchSignals (Requirement 2.5)
+// ---------------------------------------------------------------------------
+
+describe('getBatchSignals', () => {
+  const mockPayload = {
+    closes:  [100, 101, 102, 103, 104],
+    highs:   [101, 102, 103, 104, 105],
+    lows:    [99,  100, 101, 102, 103],
+    volumes: [500, 600, 700, 800, 900],
+    params:  { period: 14 },
+    symbol:  'BTCUSDT',
+  };
+
+  it('calls POST /strategy/analyze/batch with correct body', async () => {
+    let capturedUrl = null;
+    let capturedBody = null;
+
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url, options) => {
+      capturedUrl = url;
+      capturedBody = JSON.parse(options.body);
+      return Promise.resolve({
+        json: () => Promise.resolve({ signals: ['LONG', 'NONE', 'SHORT', 'NONE', 'LONG'], confidences: [0.8, 0.0, 0.7, 0.0, 0.9] }),
+      });
+    }));
+
+    await getBatchSignals('rsi', mockPayload);
+
+    expect(capturedUrl).toMatch(/\/strategy\/analyze\/batch$/);
+    expect(capturedBody.strategy).toBe('rsi');
+    expect(capturedBody.symbol).toBe('BTCUSDT');
+    expect(capturedBody.closes).toEqual(mockPayload.closes);
+    expect(capturedBody.highs).toEqual(mockPayload.highs);
+    expect(capturedBody.lows).toEqual(mockPayload.lows);
+    expect(capturedBody.volumes).toEqual(mockPayload.volumes);
+    expect(capturedBody.params).toEqual(mockPayload.params);
+  });
+
+  it('returns { signals, confidences } from response', async () => {
+    const mockSignals = ['LONG', 'NONE', 'SHORT', 'NONE', 'LONG'];
+    const mockConfidences = [0.8, 0.0, 0.7, 0.0, 0.9];
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      json: () => Promise.resolve({ signals: mockSignals, confidences: mockConfidences }),
+    }));
+
+    const result = await getBatchSignals('rsi', mockPayload);
+
+    expect(result.signals).toEqual(mockSignals);
+    expect(result.confidences).toEqual(mockConfidences);
+  });
+
+  it('throws "Strategy AI service unavailable" when fetch fails', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+    await expect(getBatchSignals('rsi', mockPayload)).rejects.toThrow('Strategy AI service unavailable');
   });
 });

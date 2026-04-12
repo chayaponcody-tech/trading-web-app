@@ -1,7 +1,7 @@
 // Feature: backtest-ui-api-integration, Property 9
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';
-import { isLeverageVisible } from './Backtest';
+import { isLeverageVisible } from '../utils/backtestUtils';
 import {
   buildBacktestConfig,
   resolveApiErrorMessage,
