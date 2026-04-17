@@ -8,6 +8,7 @@ import numpy as np
 from logger import get_logger
 from registry import StrategyRegistry
 from pine_loader import load_pine_strategies
+from db_strategy_loader import load_db_strategies
 from strategies.bollinger_breakout import BollingerBreakout
 from strategies.ema_cross import EMACross
 from strategies.rsi_strategy import RSIStrategy
@@ -19,6 +20,7 @@ from strategies.vwap_scalp import VWAPScalpStrategy
 from strategies.scouter import ScouterStrategy
 from strategies.grid import GridStrategy
 from strategies.oi_funding_alpha import OIFundingAlphaStrategy
+from strategies.sats import SelfAwareTrendSystem
 from confidence_engine import ConfidenceEngine
 from microstructure_filter import check as microstructure_check
 from schemas import AnalyzeRequest, AnalyzeResponse, BatchAnalyzeRequest, BatchAnalyzeResponse, StrategyListResponse, StrategyEntry, RegisterDynamicRequest, UnregisterRequest, SavePineRequest, OptimizeRequest, OptimizeResponse, VbtOptimizeRequest, VbtOptimizeResponse
@@ -81,10 +83,19 @@ registry.register("STOCH_RSI", StochRSIStrategy())
 registry.register("VWAP_SCALP", VWAPScalpStrategy())
 registry.register("AI_SCOUTER", ScouterStrategy())
 registry.register("GRID", GridStrategy())
+registry.register("AI_GRID", GridStrategy())
+registry.register("AI_GRID_SCALP", GridStrategy())
+registry.register("AI_GRID_SWING", GridStrategy())
+registry.register("RSI_DIVERGENCE", RSIStrategy())
+registry.register("BOLLINGER_BREAKOUT", BollingerBreakout())
 registry.register("OI_FUNDING_ALPHA", OIFundingAlphaStrategy())
+registry.register("SATS", SelfAwareTrendSystem())
 
 loaded = load_pine_strategies(registry, "strategies/")
 log.info(f"🌲 [PineLoader] Loaded {len(loaded)} pine strategies: {loaded}")
+
+db_loaded = load_db_strategies(registry)
+log.info(f"🗄️  [DBLoader] Loaded {len(db_loaded)} DB strategies: {[k for k,_ in db_loaded]}")
 
 confidence_engine = ConfidenceEngine(
     mode=AI_MODE,
@@ -108,65 +119,56 @@ def compute_atr(highs: list[float], lows: list[float], closes: list[float], peri
     return float(np.mean(tr[-period:]))
 
 
-def compute_features(closes: list[float], highs: list[float] = None, lows: list[float] = None) -> dict:
-    """Compute quantitative features from close prices (+ optional OHLC for ATR)."""
+def compute_batch_features(closes: list[float], highs: list[float] = None, lows: list[float] = None) -> list[dict]:
+    """Vectorized calculation of features for all indices in the dataset. O(n)."""
     arr = np.array(closes, dtype=float)
-    if len(arr) < 20:
-        return {}
+    n = len(arr)
+    if n < 50:
+        return [{} for _ in range(n)]
 
-    # RSI (14)
-    deltas = np.diff(arr)
-    gains = np.where(deltas > 0, deltas, 0)
-    losses = np.where(deltas < 0, -deltas, 0)
-    avg_gain = np.mean(gains[-14:]) if len(gains) >= 14 else 0
-    avg_loss = np.mean(losses[-14:]) if len(losses) >= 14 else 1e-9
-    rsi = 100 - (100 / (1 + avg_gain / avg_loss))
+    import pandas as pd
+    import ta
+    df = pd.DataFrame({"close": arr})
+    if highs: df["high"] = np.array(highs, dtype=float)
+    if lows: df["low"] = np.array(lows, dtype=float)
 
-    # EMA 20 / 50
-    def ema(data, period):
-        k = 2 / (period + 1)
-        result = [data[0]]
-        for v in data[1:]:
-            result.append(v * k + result[-1] * (1 - k))
-        return result
+    # Calculate indicators for the ENTIRE array at once
+    rsi = ta.momentum.rsi(df["close"], window=14)
+    ema20 = ta.trend.ema_indicator(df["close"], window=20)
+    ema50 = ta.trend.ema_indicator(df["close"], window=50)
+    
+    bb = ta.volatility.BollingerBands(df["close"], window=20, window_dev=2)
+    bb_upper = bb.bollinger_hband()
+    bb_lower = bb.bollinger_lband()
+    bb_pos = (df["close"] - bb_lower) / (bb_upper - bb_lower + 1e-9)
 
-    ema20 = ema(arr.tolist(), 20)[-1]
-    ema50 = ema(arr.tolist(), 50)[-1] if len(arr) >= 50 else ema20
-    price = arr[-1]
+    # Returns for volatility
+    rets = df["close"].pct_change()
+    vol = rets.rolling(20).std()
+    
+    # Momentum
+    mom = df["close"].pct_change(10)
 
-    # Bollinger Bands (20)
-    bb_window = arr[-20:]
-    bb_mean = np.mean(bb_window)
-    bb_std = np.std(bb_window)
-    bb_upper = bb_mean + 2 * bb_std
-    bb_lower = bb_mean - 2 * bb_std
-    bb_position = (price - bb_lower) / (bb_upper - bb_lower + 1e-9)  # 0=lower, 1=upper
+    # ATR (requires highs/lows)
+    atr_series = pd.Series([0.0] * n)
+    if "high" in df and "low" in df:
+        atr_series = ta.volatility.average_true_range(df["high"], df["low"], df["close"], window=14)
 
-    # Volatility (std of last 20 returns)
-    returns = np.diff(arr[-21:]) / arr[-21:-1]
-    volatility = float(np.std(returns)) if len(returns) > 0 else 0
+    features_list = []
+    for i in range(n):
+        features_list.append({
+            "rsi": float(rsi.iloc[i]) if not pd.isna(rsi.iloc[i]) else 50.0,
+            "ema20": float(ema20.iloc[i]) if not pd.isna(ema20.iloc[i]) else 0.0,
+            "ema50": float(ema50.iloc[i]) if not pd.isna(ema50.iloc[i]) else 0.0,
+            "ema_cross": float(ema20.iloc[i] - ema50.iloc[i]) if not pd.isna(ema20.iloc[i]) and not pd.isna(ema50.iloc[i]) else 0.0,
+            "bb_position": float(bb_pos.iloc[i]) if not pd.isna(bb_pos.iloc[i]) else 0.5,
+            "volatility": float(vol.iloc[i]) if not pd.isna(vol.iloc[i]) else 0.0,
+            "momentum": float(mom.iloc[i]) if not pd.isna(mom.iloc[i]) else 0.0,
+            "price": float(df["close"].iloc[i]),
+            "atr": float(atr_series.iloc[i]) if not pd.isna(atr_series.iloc[i]) else 0.0,
+        })
+    return features_list
 
-    # Momentum (price vs 10 candles ago)
-    momentum = float((price - arr[-10]) / arr[-10]) if len(arr) >= 10 else 0
-
-    # Candle body ratio (last candle)
-    body = abs(arr[-1] - arr[-2]) / (arr[-2] + 1e-9) if len(arr) >= 2 else 0
-
-    # ATR (14) — requires highs/lows; falls back to 0 if not provided
-    atr = compute_atr(highs, lows, closes) if (highs and lows) else 0.0
-
-    return {
-        "rsi": float(rsi),
-        "ema20": float(ema20),
-        "ema50": float(ema50),
-        "ema_cross": float(ema20 - ema50),
-        "bb_position": float(bb_position),
-        "volatility": float(volatility),
-        "momentum": float(momentum),
-        "body_ratio": float(body),
-        "price": float(price),
-        "atr": atr,
-    }
 
 
 # ─── Regime Detection ─────────────────────────────────────────────────────────
@@ -372,8 +374,14 @@ async def strategy_analyze(req: AnalyzeRequest):
         )
 
     # ── Step 3: Feature engineering + Confidence score ───────────────────────
-    features = compute_features(req.closes, req.highs, req.lows)
+    # Legacy compute_features (single point)
+    def compute_features_single(cls, hi, lo):
+        batch = compute_batch_features(cls, hi, lo)
+        return batch[-1] if batch else {}
+
+    features = compute_features_single(req.closes, req.highs, req.lows)
     regime = detect_regime(features)
+
     atr_value = features.get("atr", 0.0) or None
 
     confidence, reason = confidence_engine.score(
@@ -448,31 +456,40 @@ async def strategy_analyze_batch(req: BatchAnalyzeRequest):
 
     signals: list[str] = []
     confidences: list[float] = []
+    metadatas: list[dict] = []
 
-    # Iterate over candles maintaining no-look-ahead: candle i sees only [:i+1]
+    # ── Step 1: Call vectorized strategy execution ────────────────────────
+    batch_result = strategy.compute_batch_signals(
+        req.closes, req.highs, req.lows, req.volumes, req.params
+    )
+    raw_signals = batch_result["signals"]
+    raw_metadatas = batch_result["metadatas"]
+
+    # ── Step 2: Vectorized Feature Engineering for the whole batch ────────
+    all_features = compute_batch_features(req.closes, req.highs, req.lows)
+
+    signals: list[str] = []
+    confidences: list[float] = []
+    metadatas: list[dict] = []
+
+    # ── Step 3: Fast loop for confidence scoring (no redundant indicator math) ──
     for i in range(n):
-        end = i + 1
-        result = strategy.compute_signal(
-            closes_arr[:end].tolist(),
-            highs_arr[:end].tolist(),
-            lows_arr[:end].tolist(),
-            volumes_arr[:end].tolist(),
-            req.params,
-        )
-        raw_signal = result.get("signal", "NONE")
-
-        features = compute_features(closes_arr[:end].tolist())
+        raw_signal = raw_signals[i]
+        features = all_features[i]
         regime = detect_regime(features)
+        
+        # Note: microstructure check is skipped for backtesting efficiency 
+        # as it would require historical funding/OI data which is often missing
+        
         confidence, _ = confidence_engine.score(
-            raw_signal, features, regime, result.get("metadata", {}),
-            closes=closes_arr[:end].tolist(),
-            highs=highs_arr[:end].tolist(),
-            lows=lows_arr[:end].tolist(),
+            raw_signal, features, regime, raw_metadatas[i],
+            closes=None, # Prevents re-extracting features in ConfidenceEngine
         )
-        confidence = max(0.0, min(1.0, confidence))
-
+        
         signals.append(raw_signal)
         confidences.append(round(confidence, 4))
+        metadatas.append(raw_metadatas[i])
+
 
     longs  = signals.count("LONG")
     shorts = signals.count("SHORT")
@@ -481,7 +498,7 @@ async def strategy_analyze_batch(req: BatchAnalyzeRequest):
         f"LONG={longs} SHORT={shorts} NONE={n - longs - shorts}"
     )
 
-    return BatchAnalyzeResponse(signals=signals, confidences=confidences)
+    return BatchAnalyzeResponse(signals=signals, confidences=confidences, metadatas=metadatas)
 
 
 @app.get("/strategy/list", response_model=StrategyListResponse)

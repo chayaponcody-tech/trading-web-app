@@ -1,0 +1,4 @@
+# file: D:\Crypto\trading-web-app\packages\quant-engine\core\evolutionary_loop.py
+# hypothesis_version: 6.151.12
+
+['Backtest rejected', 'agent_name', 'alpha_agent', 'backtest_agent', 'cycle_id', 'data_agent', 'error', 'error_type', 'idle', 'input_payload', 'lineage_id', 'metrics', 'python_code_length', 'rejection_reason', 'running', 'sentiment_agent', 'strategy_key', 'strategy_manager', 'success', 'timeout', 'timestamp', 'topic']

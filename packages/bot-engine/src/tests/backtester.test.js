@@ -116,6 +116,12 @@ function baseConfig(overrides = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Provide a default empty response for Python strategies to avoid "HTTP undefined" or undefined signals
+  getBatchSignals.mockResolvedValue({
+    signals: Array.from({ length: 500 }, () => 'NONE'),
+    confidences: Array.from({ length: 500 }, () => 0.0),
+    metadatas: Array.from({ length: 500 }, () => ({})),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -273,20 +279,26 @@ describe('Property 5: Signal Flip Exit', () => {
           const klines = makeSyntheticKlines(100, 100);
           fetchKlines.mockResolvedValue(klines);
 
-          // Signal: initialSignal at i=50, flipSignal at i=51, NONE after
-          computeSignal.mockImplementation((closes) => {
-            if (closes.length === 50) return initialSignal;
-            if (closes.length === 51) return flipSignal;
-            return 'NONE';
+          getBatchSignals.mockImplementation((_strategyKey, req) => {
+            const signals = Array.from({ length: req.closes.length }, (_, i) => {
+              if (i === 50) return initialSignal;
+              if (i === 51) return flipSignal;
+              return 'NONE';
+            });
+            return Promise.resolve({
+              signals,
+              confidences: signals.map(s => s === 'NONE' ? 0 : 0.8),
+              metadatas: signals.map(() => ({})),
+            });
           });
 
           const result = await runBacktest(null, baseConfig({ tpPercent: 50, slPercent: 50 }));
 
-          const flippedTrades = (result.trades ?? []).filter(t => t.exitReason === 'Signal Flipped');
+          const flippedTrades = (result.trades ?? []).filter(t => t.exitReason === 'Alpha Decay: Signal Flipped');
           expect(flippedTrades.length).toBeGreaterThan(0);
 
           for (const trade of flippedTrades) {
-            expect(trade.exitReason).toBe('Signal Flipped');
+            expect(trade.exitReason).toBe('Alpha Decay: Signal Flipped');
             expect(trade.type).toBe(initialSignal);
           }
         }
@@ -913,7 +925,7 @@ describe('runBacktest() with Python strategy — getBatchSignals call count', ()
     const config = baseConfig({ strategy: 'EMA' });
     await runBacktest(null, config);
 
-    expect(getBatchSignals).not.toHaveBeenCalled();
+    expect(getBatchSignals).toHaveBeenCalled();
   });
 });
 
@@ -973,9 +985,10 @@ describe('Backtester simulation loop — legacy pct-based TP/SL fallback when AT
     });
 
     fetchKlines.mockResolvedValue(klines);
-    computeSignal.mockImplementation((closes) => {
-      if (closes.length === 50) return 'LONG';
-      return 'NONE';
+    getBatchSignals.mockResolvedValue({
+      signals: Array.from({ length: 100 }, (_, i) => i === 50 ? 'LONG' : 'NONE'),
+      confidences: Array.from({ length: 100 }, () => 0.8),
+      metadatas: Array.from({ length: 100 }, () => ({})),
     });
 
     const result = await runBacktest(null, baseConfig({ tpPercent, slPercent }));
@@ -1010,9 +1023,10 @@ describe('Backtester simulation loop — legacy pct-based TP/SL fallback when AT
     });
 
     fetchKlines.mockResolvedValue(klines);
-    computeSignal.mockImplementation((closes) => {
-      if (closes.length === 50) return 'LONG';
-      return 'NONE';
+    getBatchSignals.mockResolvedValue({
+      signals: Array.from({ length: 100 }, (_, i) => i === 50 ? 'LONG' : 'NONE'),
+      confidences: Array.from({ length: 100 }, () => 0.8),
+      metadatas: Array.from({ length: 100 }, () => ({})),
     });
 
     const result = await runBacktest(null, baseConfig({ tpPercent, slPercent }));

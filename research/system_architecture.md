@@ -24,6 +24,7 @@ packages/
   ai-agents/          — LLM agents (OpenRouter)
   shared/             — AnalyticsUtils, config constants
   strategy-ai/        — Python FastAPI microservice (signal + confidence)
+  research/           — Markdown knowledge base files
 src/                  — React frontend
 ```
 
@@ -307,6 +308,27 @@ Custom implementations (ไม่ใช้ technicalindicators library):
 | `emaCalc(values, period)` | EMA ด้วย smoothing factor `k = 2/(period+1)` |
 | `rsiCalc(values, period=14)` | Wilder's smoothing RSI |
 | `bbCalc(values, period=20, stdDev=2)` | Bollinger Bands `{ upper, middle, lower }` |
+
+---
+
+## Module 12: Market Features Engine (`packages/data-layer/src/repositories/marketFeaturesRepo.js`)
+
+Centralized system for technical and microstructure factor calculation.
+
+- **TQI (Trend Quality Index)**: Multi-timeframe trend verification.
+- **Microstructure**: Real-time OI (Open Interest) Delta and Funding Rate monitoring.
+- **Indicators**: High-performance indicator calculations for the dashboard.
+
+---
+
+## Module 13: Research Brain (`packages/api-gateway/src/routes/researchRoutes.js`)
+
+Modular knowledge management system for the "Secondary Brain".
+
+- **Storage**: Local `.md` files in the `/research` directory.
+- **API**: CRUD operations for markdown notes.
+- **UI**: Integrated Markdown viewer and editor in the `Research` tab.
+- **Integration**: AI agents can leverage these notes as long-term memory or strategy guides.
 
 ---
 

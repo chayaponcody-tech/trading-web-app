@@ -1,5 +1,5 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare, Layers, Brain, TrendingUp, Search, Wallet, FileCode } from 'lucide-react';
+import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare, Layers, Brain, TrendingUp, Search, Wallet, FileCode, Zap, LayoutList, BookOpen } from 'lucide-react';
 import './App.css';
 
 const sectionLabel = (text: string) => (
@@ -24,6 +24,8 @@ function Sidebar() {
     { path: '/binance-live', name: 'Binance (Live Sim)', icon: <Bot size={20} color="#faad14" /> },
     { path: '/binance-real', name: 'Binance (Live 🔴)', icon: <Bot size={20} color="#f6465d" /> },
     { path: '/backtest', name: 'Backtest (ทดสอบ)', icon: <FlaskConical size={20} /> },
+    { path: '/market-analysis', name: 'Market Analysis', icon: <TrendingUp size={20} color="#0ecb81" /> },
+    { path: '/strategy-management', name: 'Strategy Management', icon: <LayoutList size={20} color="#00d1ff" /> },
   ];
 
   const predictionItems = [
@@ -34,7 +36,11 @@ function Sidebar() {
 
   const intelligenceItems = [
     { path: '/sentiment', name: 'Sentiment Analysis', icon: <Brain size={20} color="#a78bfa" /> },
+    { path: '/quant-engine', name: 'Quant Engine 🧬', icon: <Zap size={20} color="#a78bfa" /> },
     { path: '/pine-import', name: 'Pine Import', icon: <FileCode size={20} color="#a78bfa" /> },
+    { path: '/market-features', name: 'Market Features 🧬', icon: <Zap size={20} color="#faad14" /> },
+    { path: '/indicator-management', name: 'Chart Indicators', icon: <Layers size={20} color="#00d1ff" /> },
+    { path: '/research', name: 'Research Brain 🧠', icon: <BookOpen size={20} color="#00d1ff" /> },
   ];
 
   const systemItems = [
@@ -101,6 +107,12 @@ import Polymarket from './pages/Polymarket';
 import MarketsBrowser from './pages/MarketsBrowser';
 import MyBets from './pages/MyBets';
 import PineImport from './pages/PineImport';
+import QuantEngine from './pages/QuantEngine';
+import StrategyManagement from './pages/StrategyManagement';
+import IndicatorManagement from './pages/IndicatorManagement';
+import MarketAnalysis from './pages/MarketAnalysis';
+import MarketFeatures from './pages/MarketFeatures';
+import Research from './pages/Research';
 
 function App() {
   return (
@@ -122,7 +134,13 @@ function App() {
             <Route path="/polymarket" element={<Polymarket />} />
             <Route path="/markets-browser" element={<MarketsBrowser />} />
             <Route path="/my-bets" element={<MyBets />} />
+            <Route path="/market-analysis" element={<MarketAnalysis />} />
             <Route path="/pine-import" element={<PineImport />} />
+            <Route path="/quant-engine" element={<QuantEngine />} />
+            <Route path="/strategy-management" element={<StrategyManagement />} />
+            <Route path="/market-features" element={<MarketFeatures />} />
+            <Route path="/indicator-management" element={<IndicatorManagement />} />
+            <Route path="/research" element={<Research />} />
             <Route path="/config" element={<ConfigPage />} />
           </Routes>
         </main>

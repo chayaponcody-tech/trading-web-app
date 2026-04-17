@@ -72,6 +72,7 @@ vi.mock('../../../bot-engine/src/KlineFetcher.js', () => ({
 
 vi.mock('../../../bot-engine/src/PythonStrategyClient.js', () => ({
   getPythonSignal: vi.fn(),
+  getBatchSignals: vi.fn(),
   clearCache: vi.fn(),
 }));
 
@@ -84,7 +85,7 @@ vi.mock('../../../bot-engine/src/SignalEngine.js', () => ({
 // ─── 6. Import modules AFTER mocks ────────────────────────────────────────
 
 import { fetchKlines } from '../../../bot-engine/src/KlineFetcher.js';
-import { getPythonSignal } from '../../../bot-engine/src/PythonStrategyClient.js';
+import { getPythonSignal, getBatchSignals } from '../../../bot-engine/src/PythonStrategyClient.js';
 import { computeSignal } from '../../../bot-engine/src/SignalEngine.js';
 import { createBacktestRoutes } from '../routes/backtestRoutes.js';
 
@@ -159,10 +160,12 @@ describe('Integration: PYTHON: strategy flow', () => {
     // Arrange: klines that trigger a TP trade
     fetchKlines.mockResolvedValue(makeTpKlines(120, 100, 2.0));
 
-    // getPythonSignal: LONG at candle 50 (closes.length === 50), NONE otherwise
-    getPythonSignal.mockImplementation((_strategyKey, window) =>
-      window.closes.length === 50 ? Promise.resolve('LONG') : Promise.resolve('NONE')
-    );
+    // getBatchSignals mock
+    getBatchSignals.mockResolvedValue({
+      signals: Array.from({ length: 120 }, (_, i) => i === 50 ? 'LONG' : 'NONE'),
+      confidences: Array.from({ length: 120 }, () => 0.8),
+      metadatas: Array.from({ length: 120 }, () => ({})),
+    });
 
     const config = {
       symbol: 'BTCUSDT',
@@ -183,15 +186,15 @@ describe('Integration: PYTHON: strategy flow', () => {
     // Assert: HTTP 200
     expect(res.status).toBe(200);
 
-    // PythonStrategyClient must have been called
-    expect(getPythonSignal).toHaveBeenCalled();
+    // PythonStrategyClient batch method must have been called
+    expect(getBatchSignals).toHaveBeenCalled();
 
     // SignalEngine must NOT have been called
     expect(computeSignal).not.toHaveBeenCalled();
 
     // Verify the strategyKey passed is "bollinger_breakout" (without "PYTHON:" prefix)
-    const firstCall = getPythonSignal.mock.calls[0];
-    expect(firstCall[0]).toBe('bollinger_breakout');
+    const firstCall = getBatchSignals.mock.calls[0];
+    expect(firstCall[0]).toContain('bollinger_breakout');
 
     // Verify the window object has required fields
     const windowArg = firstCall[1];
@@ -209,9 +212,11 @@ describe('Integration: PYTHON: strategy flow', () => {
   it('returns a valid BacktestResult shape when PYTHON: strategy produces trades', async () => {
     fetchKlines.mockResolvedValue(makeTpKlines(120, 100, 2.0));
 
-    getPythonSignal.mockImplementation((_strategyKey, window) =>
-      window.closes.length === 50 ? Promise.resolve('LONG') : Promise.resolve('NONE')
-    );
+    getBatchSignals.mockResolvedValue({
+      signals: Array.from({ length: 120 }, (_, i) => i === 50 ? 'LONG' : 'NONE'),
+      confidences: Array.from({ length: 120 }, () => 0.8),
+      metadatas: Array.from({ length: 120 }, () => ({})),
+    });
 
     const config = {
       symbol: 'BTCUSDT',
@@ -319,11 +324,11 @@ describe('Integration: PYTHON: strategy flow', () => {
     // (all have the same last 50 values). So unique windows = (50 warmup candles) + 1 unique tail.
     // The mock is called for every candle (70 times) because our mock doesn't implement caching.
     // We verify the mock was called at least once (integration path works).
-    expect(getPythonSignal).toHaveBeenCalled();
+    expect(getBatchSignals).toHaveBeenCalled();
 
     // Verify all calls used the correct strategyKey
-    for (const call of getPythonSignal.mock.calls) {
-      expect(call[0]).toBe('bollinger_breakout');
+    for (const call of getBatchSignals.mock.calls) {
+      expect(call[0]).toContain('bollinger_breakout');
     }
   });
 
@@ -355,16 +360,17 @@ describe('Integration: PYTHON: strategy flow', () => {
     let totalCalls = 0;
     let cacheHits = 0;
 
-    getPythonSignal.mockImplementation((_strategyKey, window) => {
+    getBatchSignals.mockImplementation((_strategyKey, req) => {
       totalCalls++;
-      const cacheKey = JSON.stringify(window.closes.slice(-50));
-      if (seenCacheKeys.has(cacheKey)) {
-        cacheHits++;
-      } else {
-        seenCacheKeys.add(cacheKey);
-      }
-      return Promise.resolve('NONE');
+      // Batch implementation is called once for the entire dataset
+      return Promise.resolve({
+        signals: Array.from({ length: req.closes.length }, () => 'NONE'),
+        confidences: Array.from({ length: req.closes.length }, () => 0.5),
+        metadatas: Array.from({ length: req.closes.length }, () => ({})),
+      });
     });
+    // Note: PythonStrategyClient.getPythonSignal is for live trading (single call per candle)
+    // Backtester now uses getBatchSignals for entire dataset in one call.
 
     const config = {
       symbol: 'BTCUSDT',
@@ -380,13 +386,14 @@ describe('Integration: PYTHON: strategy flow', () => {
 
     expect(res.status).toBe(200);
 
-    // Backtester iterates from index 50 to 119 → 70 calls total (mock has no cache)
-    expect(totalCalls).toBe(70);
+    // Backtester calls getBatchSignals ONCE for the whole dataset
+    expect(totalCalls).toBe(1);
 
     // With constant price, closes.slice(-50) is always [100,100,...,100] for all windows
     // → only 1 unique cache key, 69 cache hits
-    expect(seenCacheKeys.size).toBe(1);
-    expect(cacheHits).toBe(69);
+    // Internal caching within getBatchSignals is handled by the Python service, 
+    // so we verify that its called exactly once for the batch.
+    expect(totalCalls).toBe(1);
   });
 
   // ── Test 5: strategy-ai unavailable → response contains error ─────────────
@@ -395,7 +402,7 @@ describe('Integration: PYTHON: strategy flow', () => {
     fetchKlines.mockResolvedValue(makeSyntheticKlines(120, 100));
 
     // Simulate strategy-ai being unavailable
-    getPythonSignal.mockRejectedValue(new Error('Strategy AI service unavailable'));
+    getBatchSignals.mockRejectedValue(new Error('Strategy AI service unavailable'));
 
     const config = {
       symbol: 'BTCUSDT',

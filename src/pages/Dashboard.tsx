@@ -1,6 +1,22 @@
 import { useState, useEffect } from 'react';
-import { TrendingUp, DollarSign, Activity } from 'lucide-react';
+import { TrendingUp, DollarSign, Activity, Brain, Zap } from 'lucide-react';
 import AutoTrendChart from '../components/AutoTrendChart';
+
+const QUANT_URL = 'http://localhost:8002';
+
+interface QuantSentiment {
+  symbol: string;
+  score: number;
+  funding_rate: number;
+  timestamp: string;
+}
+
+interface QuantStrategy {
+  strategy_key: string;
+  status: string;
+  backtest_metrics: Record<string, number>;
+  approved_at: string;
+}
 
 interface TradeInfo {
   type: string;
@@ -23,19 +39,41 @@ interface BackendState {
 export default function Dashboard() {
   const [activeSymbol] = useState('BTC/USDT');
   const [backendState, setBackendState] = useState<BackendState | null>(null);
+  const [quantSentiment, setQuantSentiment] = useState<QuantSentiment[]>([]);
+  const [quantStrategies, setQuantStrategies] = useState<QuantStrategy[]>([]);
 
   useEffect(() => {
-    // Fetch backend state for stats and trades
     const fetchBackend = () => {
        fetch('/api/state')
          .then(res => res.json())
          .then(data => setBackendState(data))
          .catch(err => console.error(err));
     };
-    
     fetchBackend();
     const intervalId = setInterval(fetchBackend, 5000);
     return () => clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
+    const fetchQuant = async () => {
+      try {
+        const [btcRes, ethRes, stratRes] = await Promise.allSettled([
+          fetch(`${QUANT_URL}/sentiment/BTCUSDT`),
+          fetch(`${QUANT_URL}/sentiment/ETHUSDT`),
+          fetch(`${QUANT_URL}/strategies`),
+        ]);
+        const scores: QuantSentiment[] = [];
+        if (btcRes.status === 'fulfilled' && btcRes.value.ok) scores.push(await btcRes.value.json());
+        if (ethRes.status === 'fulfilled' && ethRes.value.ok) scores.push(await ethRes.value.json());
+        setQuantSentiment(scores);
+        if (stratRes.status === 'fulfilled' && stratRes.value.ok) {
+          setQuantStrategies(await stratRes.value.json());
+        }
+      } catch { /* quant-engine offline — silent */ }
+    };
+    fetchQuant();
+    const id = setInterval(fetchQuant, 30000);
+    return () => clearInterval(id);
   }, []);
 
 
@@ -155,6 +193,66 @@ export default function Dashboard() {
               <li className="flex-between"><strong style={{color: 'var(--text-main)'}}>ATOM / BTC</strong><span className="text-profit">⬆ 7.28%</span></li>
             </ul>
           </div>
+        </div>
+      </div>
+
+      {/* Quant Engine Widgets */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '1.5rem' }}>
+        {/* Sentiment Widget */}
+        <div className="glass-panel">
+          <div className="flex-between" style={{ marginBottom: '1rem' }}>
+            <h3 className="m-0" style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Brain size={16} color="var(--accent-primary)" /> Quant Sentiment
+            </h3>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>via quant-engine</span>
+          </div>
+          {quantSentiment.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>Quant engine offline or no data yet.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {quantSentiment.map(s => {
+                const color = s.score >= 60 ? 'var(--profit-color)' : s.score <= 40 ? 'var(--loss-color)' : '#faad14';
+                const label = s.score >= 60 ? 'Bullish' : s.score <= 40 ? 'Bearish' : 'Neutral';
+                return (
+                  <div key={s.symbol} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <span style={{ fontWeight: 600, width: '80px', color: 'var(--text-main)' }}>{s.symbol}</span>
+                    <div style={{ flex: 1, height: '6px', background: 'var(--bg-dark)', borderRadius: '3px', overflow: 'hidden' }}>
+                      <div style={{ width: `${s.score}%`, height: '100%', background: color, borderRadius: '3px' }} />
+                    </div>
+                    <span style={{ fontWeight: 700, color, width: '40px', textAlign: 'right' }}>{s.score.toFixed(0)}</span>
+                    <span style={{ fontSize: '0.75rem', color, width: '55px' }}>{label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Approved Strategies Widget */}
+        <div className="glass-panel">
+          <div className="flex-between" style={{ marginBottom: '1rem' }}>
+            <h3 className="m-0" style={{ fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Zap size={16} color="#faad14" /> Evolutionary Strategies
+            </h3>
+            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+              {quantStrategies.filter(s => s.status === 'active').length} active
+            </span>
+          </div>
+          {quantStrategies.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: 0 }}>No strategies yet. Trigger a generation cycle.</p>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              {quantStrategies.slice(0, 5).map((s, i) => (
+                <div key={i} className="flex-between" style={{ fontSize: '0.85rem' }}>
+                  <span style={{ color: 'var(--text-main)', fontFamily: 'monospace', fontSize: '0.78rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>{s.strategy_key}</span>
+                  <span style={{ color: (s.backtest_metrics?.sharpe ?? 0) > 1.5 ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 600 }}>
+                    Sharpe {(s.backtest_metrics?.sharpe ?? 0).toFixed(2)}
+                  </span>
+                  <span style={{ color: s.status === 'active' ? 'var(--profit-color)' : 'var(--loss-color)', fontSize: '0.75rem' }}>● {s.status}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

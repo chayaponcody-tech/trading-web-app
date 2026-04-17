@@ -76,8 +76,8 @@ const baseParamsArb = fc.record<RunBacktestParams>({
   symbol: nonEmptyString,
   strategy: nonEmptyString,
   interval: nonEmptyString,
-  tpPercent: fc.float({ min: Math.fround(0.1), max: Math.fround(100), noNaN: true }),
-  slPercent: fc.float({ min: Math.fround(0.1), max: Math.fround(100), noNaN: true }),
+  tpMultiplier: fc.float({ min: Math.fround(0.1), max: Math.fround(100), noNaN: true }),
+  slMultiplier: fc.float({ min: Math.fround(0.1), max: Math.fround(100), noNaN: true }),
   leverage: fc.integer({ min: 1, max: 125 }),
   capital: fc.float({ min: Math.fround(1), max: Math.fround(1_000_000), noNaN: true }),
   startDate: fc.option(nonEmptyString, { nil: undefined }),
@@ -103,13 +103,13 @@ describe('Property 1: Request body completeness', () => {
         expect(config.symbol).toBe(params.symbol);
         expect(config.strategy).toBe(params.strategy);
         expect(config.interval).toBe(params.interval);
-        expect(config.tpPercent).toBe(params.tpPercent);
-        expect(config.slPercent).toBe(params.slPercent);
+        expect(config.tpMultiplier).toBe(params.tpMultiplier);
+        expect(config.slMultiplier).toBe(params.slMultiplier);
         expect(config.leverage).toBe(params.leverage);
         expect(config.capital).toBe(params.capital);
 
         // All required keys must be present
-        const requiredKeys = ['symbol', 'strategy', 'interval', 'tpPercent', 'slPercent', 'leverage', 'capital'];
+        const requiredKeys = ['symbol', 'strategy', 'interval', 'tpMultiplier', 'slMultiplier', 'leverage', 'capital'];
         for (const key of requiredKeys) {
           expect(config).toHaveProperty(key);
         }
@@ -225,8 +225,8 @@ describe('Property 8: JS strategy key passthrough (no transformation)', () => {
         symbol: 'BTCUSDT',
         strategy: key,
         interval: '1h',
-        tpPercent: 2,
-        slPercent: 1,
+        tpMultiplier: 2,
+        slMultiplier: 1,
         leverage: 10,
         capital: 1000,
         isPythonMode: false,
@@ -277,8 +277,8 @@ describe('Property 13: State cleared on new run', () => {
           symbol: nonEmptyString,
           strategy: nonEmptyString,
           interval: nonEmptyString,
-          tpPercent: fc.float({ min: Math.fround(0.1), max: Math.fround(100), noNaN: true }),
-          slPercent: fc.float({ min: Math.fround(0.1), max: Math.fround(100), noNaN: true }),
+          tpMultiplier: fc.float({ min: Math.fround(0.1), max: Math.fround(100), noNaN: true }),
+          slMultiplier: fc.float({ min: Math.fround(0.1), max: Math.fround(100), noNaN: true }),
           leverage: fc.integer({ min: 1, max: 125 }),
           capital: fc.float({ min: Math.fround(1), max: Math.fround(1_000_000), noNaN: true }),
         }),

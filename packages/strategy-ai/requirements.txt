@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 pandas
-ta-lib
+ta
 ccxt
 requests
 python-dotenv

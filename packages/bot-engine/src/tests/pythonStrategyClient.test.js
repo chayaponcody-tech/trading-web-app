@@ -131,6 +131,8 @@ describe('getBatchSignals', () => {
       capturedUrl = url;
       capturedBody = JSON.parse(options.body);
       return Promise.resolve({
+        ok: true,
+        status: 200,
         json: () => Promise.resolve({ signals: ['LONG', 'NONE', 'SHORT', 'NONE', 'LONG'], confidences: [0.8, 0.0, 0.7, 0.0, 0.9] }),
       });
     }));
@@ -152,6 +154,8 @@ describe('getBatchSignals', () => {
     const mockConfidences = [0.8, 0.0, 0.7, 0.0, 0.9];
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
       json: () => Promise.resolve({ signals: mockSignals, confidences: mockConfidences }),
     }));
 

@@ -9,19 +9,31 @@ export interface Trade {
   exitTime: string;
   pnl: number;
   pnlPct: number;
-  positionSize?: number;   // notional value including leverage (USDT)
+  positionSize?: number;
   entryReason?: string;
   entryConfidence?: number | null;
   exitReason: string;
   tpPrice: number;
+  tp2Price?: number;
+  tp3Price?: number;
   slPrice: number;
   atr?: number | null;
   regime?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 export interface OverlayDataPoint {
   time: string;   // ISO 8601
   value: number;
+}
+
+export interface OverlayZone {
+  startTime: string;
+  endTime?: string;
+  top: number;
+  bottom: number;
+  type: 'OB' | 'BB' | 'MT' | 'HOB';
+  mid?: number;
 }
 
 export interface OverlayData {
@@ -31,6 +43,7 @@ export interface OverlayData {
   bbMiddle?: OverlayDataPoint[];
   bbLower?:  OverlayDataPoint[];
   rsi?:      OverlayDataPoint[];
+  zones?:    OverlayZone[];
 }
 
 export interface OverlayToggleState {
@@ -38,6 +51,8 @@ export interface OverlayToggleState {
   ema50: boolean;
   bb: boolean;
   rsi: boolean;
+  levels: boolean;
+  zones: boolean;
 }
 
 export const OVERLAY_COLORS = {

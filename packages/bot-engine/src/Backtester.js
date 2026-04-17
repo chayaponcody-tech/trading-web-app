@@ -8,48 +8,13 @@ import {
   calculateProfitFactor,
   computeSignalConfidence,
 } from '../../shared/AnalyticsUtils.js';
+import {
+  emaCalc,
+  rsiCalc,
+  bbCalc,
+  computeATR,
+} from '../../shared/indicators.js';
 import { saveBacktestResult } from '../../data-layer/src/repositories/backtestRepository.js';
-// Inlined indicator helpers (avoids cross-boundary import from backend/)
-function emaCalc(values, period) {
-  if (values.length < period) return [];
-  const k = 2 / (period + 1);
-  let ema = [values.slice(0, period).reduce((a, b) => a + b, 0) / period];
-  for (let i = period; i < values.length; i++) {
-    ema.push(values[i] * k + ema[ema.length - 1] * (1 - k));
-  }
-  return ema;
-}
-
-function rsiCalc(values, period = 14) {
-  if (values.length <= period) return [];
-  let gains = 0, losses = 0;
-  for (let i = 1; i <= period; i++) {
-    const d = values[i] - values[i - 1];
-    if (d >= 0) gains += d; else losses -= d;
-  }
-  let avgGain = gains / period, avgLoss = losses / period;
-  const rsi = [avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss)];
-  for (let i = period + 1; i < values.length; i++) {
-    const d = values[i] - values[i - 1];
-    avgGain = (avgGain * (period - 1) + Math.max(d, 0)) / period;
-    avgLoss = (avgLoss * (period - 1) + Math.max(-d, 0)) / period;
-    rsi.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
-  }
-  return rsi;
-}
-
-function bbCalc(values, period = 20, stdDev = 2) {
-  if (values.length < period) return [];
-  const bands = [];
-  for (let i = period - 1; i < values.length; i++) {
-    const slice = values.slice(i - period + 1, i + 1);
-    const mean = slice.reduce((a, b) => a + b, 0) / period;
-    const variance = slice.reduce((a, b) => a + (b - mean) ** 2, 0) / period;
-    const sd = Math.sqrt(variance);
-    bands.push({ upper: mean + stdDev * sd, lower: mean - stdDev * sd, middle: mean });
-  }
-  return bands;
-}
 
 const MIN_CANDLES = 50;
 const TAKER_FEE_RATE = 0.0004; // 0.04%
@@ -63,22 +28,22 @@ const TAKER_FEE_RATE = 0.0004; // 0.04%
  * with its execution engine ('js' or 'python') so the Backtester can route correctly.
  */
 export const STRATEGY_REGISTRY = {
-  EMA:           { engine: 'js' },
-  EMA_CROSS:     { engine: 'js' },
-  RSI:           { engine: 'js' },
-  BB:            { engine: 'js' },
-  GRID:          { engine: 'js' },
-  AI_GRID:       { engine: 'js' },
-  AI_GRID_SCALP: { engine: 'js' },
-  AI_GRID_SWING: { engine: 'js' },
-  AI_SCOUTER:    { engine: 'js' },
-  EMA_RSI:       { engine: 'js' },
-  BB_RSI:        { engine: 'js' },
-  EMA_BB_RSI:    { engine: 'js' },
-  EMA_SCALP:     { engine: 'js' },
-  STOCH_RSI:     { engine: 'js' },
-  VWAP_SCALP:    { engine: 'js' },
-  // Python-backed strategies (routed through getBatchSignals)
+  // All strategies now routed through Python strategy-ai service (pandas-ta)
+  EMA:                 { engine: 'python' },
+  EMA_CROSS:           { engine: 'python' },
+  RSI:                 { engine: 'python' },
+  BB:                  { engine: 'python' },
+  GRID:                { engine: 'python' },
+  AI_GRID:             { engine: 'python' },
+  AI_GRID_SCALP:       { engine: 'python' },
+  AI_GRID_SWING:       { engine: 'python' },
+  AI_SCOUTER:          { engine: 'python' },
+  EMA_RSI:             { engine: 'python' },
+  BB_RSI:              { engine: 'python' },
+  EMA_BB_RSI:          { engine: 'python' },
+  EMA_SCALP:           { engine: 'python' },
+  STOCH_RSI:           { engine: 'python' },
+  VWAP_SCALP:          { engine: 'python' },
   BOLLINGER_BREAKOUT:  { engine: 'python' },
   RSI_DIVERGENCE:      { engine: 'python' },
   OI_FUNDING_ALPHA:    { engine: 'python' },
@@ -104,26 +69,7 @@ export function applySlippage(price, side, action) {
   return price;
 }
 
-/**
- * Compute Average True Range (ATR) over a rolling window.
- * @param {number[]} highs - Array of high prices
- * @param {number[]} lows - Array of low prices
- * @param {number[]} closes - Array of close prices
- * @param {number} [period=14] - Rolling window size
- * @returns {number} ATR value, or 0 if insufficient data
- */
-export function computeATR(highs, lows, closes, period = 14) {
-  if (closes.length < period + 1) return 0;
-  const trueRanges = [];
-  for (let i = 1; i < closes.length; i++) {
-    const hl = highs[i] - lows[i];
-    const hc = Math.abs(highs[i] - closes[i - 1]);
-    const lc = Math.abs(lows[i] - closes[i - 1]);
-    trueRanges.push(Math.max(hl, hc, lc));
-  }
-  const recent = trueRanges.slice(-period);
-  return recent.reduce((a, b) => a + b, 0) / recent.length;
-}
+
 
 /**
  * Compute dynamic TP and SL prices using ATR multipliers.
@@ -155,23 +101,37 @@ export function computeTPSL(entryPrice, side, atr, { tpMultiplier = 2.0, slMulti
 }
 
 /**
- * Compute position size using Fixed Risk % per Trade.
- * Formula: (Capital × RiskPct) / SlPercent
- * e.g. capital=$10,000, riskPct=2%, slPercent=1% → positionSize=$20,000
- * Falls back to Capital × Leverage when slPercent is zero.
+ * Compute position size using volatility-inverse (ATR-based) logic.
+ * Formula: (Capital × RiskPerTrade) / (ATR × StopLossAtrMult / EntryPrice)
+ * Falls back to Capital × Leverage when ATR is unavailable.
  * @param {number} capital - Available capital
- * @param {number[]} highs - Array of high prices (unused, kept for API compatibility)
- * @param {number[]} lows - Array of low prices (unused, kept for API compatibility)
- * @param {number[]} closes - Array of close prices (unused, kept for API compatibility)
+ * @param {number[]} highs - Array of high prices
+ * @param {number[]} lows - Array of low prices
+ * @param {number[]} closes - Array of close prices
  * @param {object} [options={}]
- * @param {number} [options.riskPct=0.02] - Fraction of capital to risk per trade (default 2%)
- * @param {number} [options.slPercent=1.0] - Stop-loss % distance (default 1%)
- * @param {number} [options.leverage=10] - Leverage multiplier (used in fallback)
+ * @param {number} [options.leverage=10] - Default leverage fallback
+ * @param {number} [options.riskPerTrade=0.02] - Fraction of capital to risk
+ * @param {number} [options.stopLossAtrMult=2] - ATR multiplier for stop loss
  * @returns {number} Position size in quote currency
  */
-export function computePositionSize(capital, highs, lows, closes, { riskPct = 0.02, slPercent = 1.0, leverage = 10 } = {}) {
-  if (!slPercent || slPercent === 0) return capital * leverage; // fallback
-  return (capital * riskPct) / (slPercent / 100);
+export function computePositionSize(capital, highs, lows, closes, options = {}) {
+  const { leverage = 10, riskPerTrade = 0.02, stopLossAtrMult = 2 } = options;
+  
+  const atr = computeATR(highs, lows, closes);
+  if (!atr || atr === 0) {
+    return capital * leverage;
+  }
+
+  const entryPrice = closes[closes.length - 1];
+  const slDistance = atr * stopLossAtrMult;
+  const slPercent = (slDistance / entryPrice);
+  
+  if (slPercent === 0) return capital * leverage;
+
+  const size = (capital * riskPerTrade) / slPercent;
+  
+  // Cap by max leverage
+  return Math.min(size, capital * leverage);
 }
 
 /**
@@ -263,15 +223,17 @@ export async function runBacktest(exchange, config) {
   const highs = klines.map(k => parseFloat(k[2]));
   const lows = klines.map(k => parseFloat(k[3]));
 
-  // Auto-detect engine from STRATEGY_REGISTRY (Requirement 9.3, 9.4, 9.6)
-  const isPython = STRATEGY_REGISTRY[strategy]?.engine === 'python';
+  // Auto-detect engine: forceEngine override → STRATEGY_REGISTRY → default python
+  const isPython = config.forceEngine === 'python' || STRATEGY_REGISTRY[strategy]?.engine === 'python' || !STRATEGY_REGISTRY[strategy];
 
   // For Python strategies, fetch all signals in a single batch call before the loop
   let batchSignals = null;
   let batchConfidences = null;
-  if (isPython) {
+  let batchMetadatas = null;
+    if (isPython) {
     try {
-      const batchResult = await getBatchSignals(strategy, {
+      const strategyKey = strategy.startsWith('PYTHON:') ? strategy.substring(7) : strategy;
+      const batchResult = await getBatchSignals(strategyKey, {
         closes,
         highs,
         lows,
@@ -281,7 +243,9 @@ export async function runBacktest(exchange, config) {
       });
       batchSignals = batchResult.signals;
       batchConfidences = batchResult.confidences;
-    } catch {
+      batchMetadatas = batchResult.metadatas;
+    } catch (e) {
+      console.error('[Backtester] Python batch signals error:', e.message);
       return { error: 'Strategy AI service unavailable' };
     }
   }
@@ -315,8 +279,8 @@ export async function runBacktest(exchange, config) {
 
     let signal;
     if (isPython) {
-      signal = batchSignals[i];
-      lastConfidence = batchConfidences[i];
+      signal = batchSignals[i] ?? 'NONE';
+      lastConfidence = batchConfidences[i] ?? null;
     } else {
       signal = computeSignal(closesSlice, strategy, config);
       lastConfidence = computeSignalConfidence(signal, closesSlice);
@@ -333,7 +297,11 @@ export async function runBacktest(exchange, config) {
         entryTime = new Date(klines[i][0]).toISOString();
         entryConfidence = lastConfidence;
         entryReason = isPython
-          ? `Python:${strategy} → ${signal}`
+          ? (() => {
+              const meta = batchMetadatas?.[i] ?? {};
+              const parts = Object.entries(meta).map(([k, v]) => `${k}=${typeof v === 'number' ? v.toFixed(4) : v}`);
+              return `[${strategy}] ${signal}${parts.length ? ' | ' + parts.join(', ') : ''}`;
+            })()
           : generateEntryReason(signal, strategy, closesSlice, config);
 
         // ── Compute ATR-based dynamic TP/SL at entry ──────────────────────
@@ -747,14 +715,15 @@ async function _runBacktestOnKlines(klines, config) {
   const highs = klines.map(k => parseFloat(k[2]));
   const lows = klines.map(k => parseFloat(k[3]));
 
-  // Auto-detect engine from STRATEGY_REGISTRY (Requirement 9.3, 9.4, 9.6)
-  const isPython = STRATEGY_REGISTRY[strategy]?.engine === 'python';
+  // Auto-detect engine: forceEngine override → STRATEGY_REGISTRY → default python
+  const isPython = config.forceEngine === 'python' || STRATEGY_REGISTRY[strategy]?.engine === 'python' || !STRATEGY_REGISTRY[strategy];
 
   let batchSignals = null;
   let batchConfidences = null;
   if (isPython) {
     try {
-      const batchResult = await getBatchSignals(strategy, {
+      const strategyKey = strategy.startsWith('PYTHON:') ? strategy.substring(7) : strategy;
+      const batchResult = await getBatchSignals(strategyKey, {
         closes,
         highs,
         lows,
@@ -782,7 +751,7 @@ async function _runBacktestOnKlines(klines, config) {
 
     let signal;
     if (isPython) {
-      signal = batchSignals[i];
+      signal = batchSignals[i] ?? 'NONE';
     } else {
       signal = computeSignal(closesSlice, strategy, config);
     }

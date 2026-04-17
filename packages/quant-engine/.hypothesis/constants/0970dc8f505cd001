@@ -1,0 +1,4 @@
+# file: D:\Crypto\trading-web-app\packages\quant-engine\agents\backtest_agent.py
+# hypothesis_version: 6.151.12
+
+[0.0, 0.2, 0.95, 1.05, 1.5, 120.0, '/', '15m', 'BTCUSDT', 'approved', 'avg_sharpe', 'bear', 'bull', 'close', 'max_drawdown', 'ohlcv', 'records', 'regime_results', 'rejection_reason', 'sharpe', 'sideways', 'strategy_key', 'total_trades', 'win_rate', 'worst_regime']

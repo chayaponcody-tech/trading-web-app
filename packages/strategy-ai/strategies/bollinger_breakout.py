@@ -1,60 +1,32 @@
 import numpy as np
+import pandas as pd
+import ta
 from base_strategy import BaseStrategy
 
 
 class BollingerBreakout(BaseStrategy):
-    def compute_signal(self, closes, highs, lows, volumes, params=None) -> dict:
-        if len(closes) < 30:
-            return {"signal": "NONE", "stoploss": None, "metadata": {}}
+    """EMA-based BB breakout (period=30, 1x SD) with ATR(14) stoploss"""
 
-        arr = np.array(closes, dtype=float)
-        h   = np.array(highs,  dtype=float)
-        l   = np.array(lows,   dtype=float)
+    def populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        df["ema_basis"] = ta.trend.ema_indicator(df["close"], window=30)
+        std = df["close"].rolling(30).std()
+        df["upper_band"] = df["ema_basis"] + std
+        df["lower_band"] = df["ema_basis"] - std
+        df["atr"] = ta.volatility.average_true_range(df["high"], df["low"], df["close"], window=14)
+        return df
 
-        # EMA-based Bollinger Bands (period=30, stddev=1x)
-        ema = self._ema(arr, 30)
-        std = np.std(arr[-30:])
-        upper = ema + std
-        lower = ema - std
-
-        # ATR(14) stoploss
-        atr = self._atr(h, l, arr, 14)
-        stoploss = float(arr[-1] - 1.5 * atr)
-
-        signal = "LONG" if arr[-1] > upper else "NONE"
-
-        return {
-            "signal": signal,
-            "stoploss": stoploss if signal == "LONG" else None,
-            "metadata": {
-                "ema_basis": round(float(ema), 6),
-                "upper_band": round(float(upper), 6),
-                "lower_band": round(float(lower), 6),
-                "atr": round(float(atr), 6),
-                "stoploss_price": round(stoploss, 6),
-            }
-        }
+    def populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        df["signal"] = "NONE"
+        df.loc[df["close"] > df["upper_band"], "signal"] = "LONG"
+        
+        # Stoploss calculation (stored in df for batch retrieval)
+        df["stoploss"] = df["close"] - (1.5 * df["atr"])
+        
+        return df
 
     def get_metadata(self) -> dict:
         return {
             "name": "BollingerBreakout",
             "description": "EMA-based BB breakout (period=30, 1x SD) with ATR(14) stoploss",
-            "version": "1.0.0",
+            "version": "3.0.0",
         }
-
-    def _ema(self, data: np.ndarray, period: int) -> float:
-        k = 2.0 / (period + 1)
-        val = data[0]
-        for v in data[1:]:
-            val = v * k + val * (1 - k)
-        return val
-
-    def _atr(self, highs, lows, closes, period: int) -> float:
-        tr = np.maximum(
-            highs[1:] - lows[1:],
-            np.maximum(
-                np.abs(highs[1:] - closes[:-1]),
-                np.abs(lows[1:]  - closes[:-1])
-            )
-        )
-        return float(np.mean(tr[-period:]))

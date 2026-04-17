@@ -84,7 +84,13 @@ export async function getBatchSignals(strategyKey, payload) {
   }
 
   const data = await response.json();
-  return { signals: data.signals, confidences: data.confidences };
+
+  if (!response.ok || !Array.isArray(data.signals)) {
+    const detail = data.detail || data.error || `HTTP ${response.status}`;
+    throw new Error(`Strategy AI batch error: ${detail}`);
+  }
+
+  return { signals: data.signals, confidences: data.confidences ?? [], metadatas: data.metadatas ?? [] };
 }
 
 /**

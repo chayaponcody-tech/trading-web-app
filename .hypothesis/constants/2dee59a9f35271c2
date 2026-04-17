@@ -1,0 +1,4 @@
+# file: D:\Crypto\trading-web-app\packages\quant-engine\core\schemas.py
+# hypothesis_version: 6.151.12
+
+[0.0, 'active', 'bear', 'bull', 'decayed', 'error', 'generation_failed', 'idle', 'mutation_triggered', 'retired', 'running', 'sideways', 'success', 'timeout']

@@ -1,6 +1,7 @@
 import { computeSignal, generateEntryReason, generateDiagnostic } from './SignalEngine.js';
 import { getPythonSignal } from './PythonStrategyClient.js';
-import { applySlippage, computePositionSize, computeATR, computeTPSL } from './Backtester.js';
+import { applySlippage, computePositionSize, computeTPSL } from './Backtester.js';
+import { computeATR } from '../../shared/indicators.js';
 import { reflect } from '../../ai-agents/src/ReflectionAgent.js';
 import { reviewBot } from '../../ai-agents/src/ReviewerAgent.js';
 import { assessTrailingAdjustment } from '../../ai-agents/src/TrailingAIAgent.js';
@@ -401,25 +402,23 @@ export class BotManager {
       if (bot.lastCandle !== lastCloseTime) {
         bot.lastCandle = lastCloseTime;
 
-        // Route to Python service if strategy starts with PYTHON:
+        // All strategies routed through Python strategy-ai service (pandas-ta)
+        // PYTHON: prefix still supported for Pine-converted strategies
         let signal;
-        if (strategy.startsWith('PYTHON:')) {
-          const stratKey = strategy.slice(7);
-          try {
-            const result = await getPythonSignal(stratKey, {
-              closes,
-              highs: klines.slice(0, -1).map(k => parseFloat(k[2])),
-              lows: klines.slice(0, -1).map(k => parseFloat(k[3])),
-              volumes: klines.slice(0, -1).map(k => parseFloat(k[5])),
-              params: bot.config,
-              symbol,
-            });
-            signal = result.signal;
-          } catch (e) {
-            console.error(`[Bot ${bot.id}] ${this._mode(bot)} Python signal error: ${e.message}`);
-            signal = 'NONE';
-          }
-        } else {
+        const stratKey = strategy.startsWith('PYTHON:') ? strategy.slice(7) : strategy;
+        try {
+          const result = await getPythonSignal(stratKey, {
+            closes,
+            highs: klines.slice(0, -1).map(k => parseFloat(k[2])),
+            lows: klines.slice(0, -1).map(k => parseFloat(k[3])),
+            volumes: klines.slice(0, -1).map(k => parseFloat(k[5])),
+            params: bot.config,
+            symbol,
+          });
+          signal = result.signal;
+        } catch (e) {
+          console.error(`[Bot ${bot.id}] ${this._mode(bot)} Python signal error: ${e.message}`);
+          // Fallback to JS engine if Python service unavailable
           signal = computeSignal(closes, strategy, bot.config);
         }
         bot.lastSignal = signal;

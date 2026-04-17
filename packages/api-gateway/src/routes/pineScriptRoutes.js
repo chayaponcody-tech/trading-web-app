@@ -53,7 +53,7 @@ export function createPineScriptRoutes(exchange) {
   // POST /convert — convert Pine Script to Python via AI
   router.post('/convert', async (req, res) => {
     try {
-      const { pineScript } = req.body;
+      const { pineScript, model } = req.body;
 
       if (!pineScript) {
         return res.status(400).json({ error: 'pineScript is required' });
@@ -64,7 +64,7 @@ export function createPineScriptRoutes(exchange) {
         return res.status(400).json({ error: validation.error });
       }
 
-      const result = await converter.convert(pineScript);
+      const result = await converter.convert(pineScript, model || null);
       res.json(result);
     } catch (e) {
       console.error('[PineScript /convert] error:', e.message);

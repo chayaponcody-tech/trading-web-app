@@ -65,14 +65,14 @@ vi.mock('../../../bot-engine/src/KlineFetcher.js', () => ({
   fetchKlines: vi.fn(),
 }));
 
-vi.mock('../../../bot-engine/src/SignalEngine.js', () => ({
-  computeSignal: vi.fn(),
+vi.mock('../../../bot-engine/src/PythonStrategyClient.js', () => ({
+  getBatchSignals: vi.fn(),
 }));
 
 // ─── 4. Import modules AFTER mocks are set up ──────────────────────────────────
 
 import { fetchKlines } from '../../../bot-engine/src/KlineFetcher.js';
-import { computeSignal } from '../../../bot-engine/src/SignalEngine.js';
+import { getBatchSignals } from '../../../bot-engine/src/PythonStrategyClient.js';
 import { createBacktestRoutes } from '../routes/backtestRoutes.js';
 
 // ─── 5. Synthetic kline helpers ────────────────────────────────────────────────
@@ -140,10 +140,13 @@ describe('Integration: POST /api/backtest/run end-to-end', () => {
     // Arrange: klines that trigger a TP trade
     fetchKlines.mockResolvedValue(makeTpKlines(120, 100, 2.0));
 
-    // Signal: LONG at candle 50 (closes.length === 50), NONE otherwise
-    computeSignal.mockImplementation((closes) =>
-      closes.length === 50 ? 'LONG' : 'NONE'
-    );
+    // Default: one LONG signal at candle 50
+    const signals = Array.from({ length: 1000 }, (_, i) => i === 50 ? 'LONG' : 'NONE');
+    getBatchSignals.mockResolvedValue({
+      signals,
+      confidences: signals.map(s => s === 'NONE' ? 0 : 0.85),
+      metadatas: signals.map(() => ({})),
+    });
 
     const config = {
       symbol: 'BTCUSDT',
@@ -220,9 +223,12 @@ describe('Integration: POST /api/backtest/run end-to-end', () => {
     // Arrange: klines that trigger a TP trade
     fetchKlines.mockResolvedValue(makeTpKlines(120, 100, 2.0));
 
-    computeSignal.mockImplementation((closes) =>
-      closes.length === 50 ? 'LONG' : 'NONE'
-    );
+    const signals = Array.from({ length: 120 }, (_, i) => i === 50 ? 'LONG' : 'NONE');
+    getBatchSignals.mockResolvedValue({
+      signals,
+      confidences: signals.map(s => s === 'NONE' ? 0 : 0.85),
+      metadatas: signals.map(() => ({})),
+    });
 
     const config = {
       symbol: 'ETHUSDT',
@@ -277,7 +283,12 @@ describe('Integration: POST /api/backtest/run end-to-end', () => {
   it('returns a valid result with zero trades when no signals fire', async () => {
     // Arrange: flat klines, no signals
     fetchKlines.mockResolvedValue(makeSyntheticKlines(120, 100));
-    computeSignal.mockReturnValue('NONE');
+    const signals = Array.from({ length: 120 }, () => 'NONE');
+    getBatchSignals.mockResolvedValue({
+      signals,
+      confidences: signals.map(() => 0),
+      metadatas: signals.map(() => ({})),
+    });
 
     const config = {
       symbol: 'BNBUSDT',

@@ -15,33 +15,36 @@ class BaseStrategy:
 
     def get_metadata(self) -> dict:
         """
-        Returns: {"name": str, "description": str, "params": dict}
+        Returns: {"name": str, "description": str, "version": str}
         """
         raise NotImplementedError
 `.trim();
 
 const EXAMPLE_STRATEGY = `
+import pandas as pd
+import ta
 from base_strategy import BaseStrategy
-import numpy as np
 
 class EMACrossStrategy(BaseStrategy):
-    def compute_signal(self, closes, highs, lows, volumes, params):
-        fast = params.get("fast_period", 20)
-        slow = params.get("slow_period", 50)
-        if len(closes) < slow:
+    def compute_signal(self, closes, highs, lows, volumes, params=None):
+        p = params or {}
+        fast_p = int(p.get("fastPeriod", 20))
+        slow_p = int(p.get("slowPeriod", 50))
+        if len(closes) < slow_p + 1:
             return {"signal": "NONE", "stoploss": None, "metadata": {}}
-        ema_fast = np.mean(closes[-fast:])
-        ema_slow = np.mean(closes[-slow:])
-        prev_fast = np.mean(closes[-fast-1:-1])
-        prev_slow = np.mean(closes[-slow-1:-1])
-        if prev_fast <= prev_slow and ema_fast > ema_slow:
-            return {"signal": "LONG", "stoploss": closes[-1] * 0.98, "metadata": {"ema_fast": ema_fast}}
-        if prev_fast >= prev_slow and ema_fast < ema_slow:
-            return {"signal": "SHORT", "stoploss": closes[-1] * 1.02, "metadata": {"ema_fast": ema_fast}}
+        close_series = pd.Series(closes, dtype=float)
+        fast = ta.trend.ema_indicator(close_series, window=fast_p)
+        slow = ta.trend.ema_indicator(close_series, window=slow_p)
+        prev_fast, curr_fast = fast.iloc[-2], fast.iloc[-1]
+        prev_slow, curr_slow = slow.iloc[-2], slow.iloc[-1]
+        if prev_fast <= prev_slow and curr_fast > curr_slow:
+            return {"signal": "LONG", "stoploss": None, "metadata": {"ema_fast": round(float(curr_fast), 4)}}
+        if prev_fast >= prev_slow and curr_fast < curr_slow:
+            return {"signal": "SHORT", "stoploss": None, "metadata": {"ema_fast": round(float(curr_fast), 4)}}
         return {"signal": "NONE", "stoploss": None, "metadata": {}}
 
     def get_metadata(self):
-        return {"name": "EMA Cross", "description": "EMA crossover strategy", "params": {"fast_period": 20, "slow_period": 50}}
+        return {"name": "EMACrossStrategy", "description": "EMA crossover strategy", "version": "1.0.0"}
 `.trim();
 
 export class PineScriptConverter {
@@ -51,21 +54,22 @@ export class PineScriptConverter {
    * @returns {string}
    */
   buildPrompt(pineScript) {
-    return `You are an expert Python quant developer. Convert the given Pine Script to a Python class.
+    return `You are an expert Python quant developer. Convert the given Pine Script to a Python strategy class.
 
 REQUIREMENTS:
 1. The class MUST extend BaseStrategy
 2. MUST implement compute_signal(closes, highs, lows, volumes, params) -> dict
 3. MUST implement get_metadata() -> dict
 4. compute_signal MUST return: {"signal": "LONG"|"SHORT"|"NONE", "stoploss": float|None, "metadata": dict}
-5. Use numpy for calculations
-6. Return ONLY the Python code block, no explanation
+5. Use pandas and the "ta" library (import ta) for indicator calculations — NOT pandas_ta, NOT numpy manually
+6. Available ta functions: ta.trend.ema_indicator(), ta.trend.sma_indicator(), ta.momentum.rsi(), ta.volatility.BollingerBands(), ta.momentum.StochRSIIndicator(), ta.trend.macd()
+7. Return ONLY the Python code block, no explanation
 
-CRITICAL SAFETY RULES (MUST follow to avoid runtime errors):
-- ALWAYS check array length before slicing or calling np.max/np.min/np.mean on any window
-- If len(closes) < required_period, return {"signal": "NONE", "stoploss": None, "metadata": {}}
-- NEVER call np.max() or np.min() on an empty array — always guard with: if len(arr) == 0: return ...
-- For pivot_high/pivot_low patterns, always check that the slice has enough elements before reducing
+CRITICAL SAFETY RULES:
+- ALWAYS check array length before calculations: if len(closes) < required_period: return {"signal": "NONE", ...}
+- Use pd.Series(closes, dtype=float) to convert closes to pandas Series
+- Always use .iloc[-1] and .iloc[-2] to get last values
+- Guard against NaN: if pd.isna(value): return {"signal": "NONE", ...}
 
 BASE CLASS INTERFACE:
 ${BASE_STRATEGY_INTERFACE}
@@ -123,11 +127,12 @@ ${pineScript}`;
   /**
    * Call OpenRouter API and convert Pine Script to Python BaseStrategy.
    * @param {string} pineScript
+   * @param {string} [modelOverride]
    * @returns {Promise<{ pythonCode: string, className: string }>}
    */
-  async convert(pineScript) {
+  async convert(pineScript, modelOverride) {
     const apiKey = process.env.OPENROUTER_API_KEY;
-    const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+    const model = modelOverride || process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
     const prompt = this.buildPrompt(pineScript);
 
     const body = JSON.stringify({

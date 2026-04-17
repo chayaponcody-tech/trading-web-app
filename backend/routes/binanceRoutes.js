@@ -20,6 +20,16 @@ export function createBinanceRoutes(botService) {
         });
     });
 
+    // Internal endpoint for services (quant-engine, strategy-ai) to fetch the real key
+    router.get('/config/internal-keys', (req, res) => {
+        const config = dbService.loadBinanceConfig();
+        res.json({
+            openRouterKey: config.openRouterKey || '',
+            openRouterModel: config.openRouterModel || 'google/gemini-2.0-flash-exp:free',
+            binanceApiKey: config.apiKey || '',
+        });
+    });
+
     router.post('/config', async (req, res) => {
         const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId } = req.body;
         const config = dbService.loadBinanceConfig();

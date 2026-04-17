@@ -1,19 +1,10 @@
-﻿import { useState, useEffect } from 'react';
-import { Settings, Shield, Cpu, Key, Brain, TrendingUp, Activity } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { AI_MODELS } from '../constants/aiModels';
+import { Settings, Shield, Cpu, Key, Brain, TrendingUp, Activity, Zap, RefreshCw } from 'lucide-react';
 
 const API = '';
 const POLY_API = 'http://localhost:8080';
-
-const POLY_MODELS = [
-  { value: '', label: 'Default (config.py)' },
-  { value: 'google/gemini-3-flash-preview', label: '🔮 Gemini 3 Flash Preview' },
-  { value: 'google/gemini-flash-1.5', label: '⚡ Gemini Flash 1.5 (Fast)' },
-  { value: 'google/gemini-pro-1.5', label: '♊ Gemini Pro 1.5' },
-  { value: 'anthropic/claude-3.5-sonnet', label: '🎭 Claude 3.5 Sonnet' },
-  { value: 'anthropic/claude-3-haiku', label: '🪶 Claude 3 Haiku (Fast)' },
-  { value: 'deepseek/deepseek-chat', label: '🤖 DeepSeek V3' },
-  { value: 'meta-llama/llama-3.1-405b', label: '🦙 Llama 3.1 405B' },
-];
+const QUANT_URL = 'http://localhost:8002';
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -28,7 +19,20 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 const inputStyle = { width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: '#fff', borderRadius: '4px' };
 const selectStyle = { ...inputStyle, background: 'rgba(0,0,0,0.3)' };
 export default function ConfigPage() {
-  const [tab, setTab] = useState<'crypto' | 'polymarket'>('crypto');
+  const [tab, setTab] = useState<'crypto' | 'polymarket' | 'quant'>('crypto');
+
+  // ── Quant Engine state ────────────────────────────────────────────────────
+  const [quantCfg, setQuantCfg] = useState({
+    backend_url: 'http://localhost:4001',
+    strategy_ai_url: 'http://localhost:8000',
+    etl_symbols: 'BTCUSDT,ETHUSDT',
+    etl_interval: '15m',
+    decay_threshold: 70,
+  });
+  const [quantOnline, setQuantOnline] = useState<boolean | null>(null);
+  const [quantSaving, setQuantSaving] = useState(false);
+  const [quantSaved, setQuantSaved] = useState(false);
+  const [quantPinging, setQuantPinging] = useState(false);
 
   // ── Crypto state ──────────────────────────────────────────────────────────
   const [cfg, setCfg] = useState({
@@ -55,6 +59,45 @@ export default function ConfigPage() {
   const [polyOnline, setPolyOnline] = useState<boolean | null>(null);
   const [polySaving, setPolySaving] = useState(false);
   const [polySaved, setPolySaved] = useState(false);
+
+  const fetchQuantCfg = async () => {
+    setQuantPinging(true);
+    try {
+      const res = await fetch(`${QUANT_URL}/config`);
+      if (!res.ok) { setQuantOnline(false); return; }
+      const d = await res.json();
+      setQuantOnline(true);
+      setQuantCfg({
+        backend_url: d.backend_url ?? '',
+        strategy_ai_url: d.strategy_ai_url ?? '',
+        etl_symbols: (d.etl_symbols ?? []).join(','),
+        etl_interval: d.etl_interval ?? '15m',
+        decay_threshold: d.decay_threshold ?? 70,
+      });
+    } catch { setQuantOnline(false); }
+    setQuantPinging(false);
+  };
+
+  const handleSaveQuant = async () => {
+    setQuantSaving(true);
+    try {
+      const res = await fetch(`${QUANT_URL}/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          backend_url: quantCfg.backend_url,
+          strategy_ai_url: quantCfg.strategy_ai_url,
+          etl_symbols: quantCfg.etl_symbols.split(',').map(s => s.trim()).filter(Boolean),
+          etl_interval: quantCfg.etl_interval,
+          decay_threshold: Number(quantCfg.decay_threshold),
+        }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      setQuantSaved(true);
+      setTimeout(() => setQuantSaved(false), 2000);
+    } catch (e: any) { alert('Quant Save Error: ' + e.message); }
+    setQuantSaving(false);
+  };
 
   const fetchCryptoCfg = async () => {
     try {
@@ -91,6 +134,7 @@ export default function ConfigPage() {
   useEffect(() => {
     fetchCryptoCfg();
     pingStrategyAi();
+    fetchQuantCfg();
     fetch('/api/config/my-ip').then(r => r.json()).then(d => setMyIp(d.ip)).catch(() => {});
     fetch(`${POLY_API}/api/config`)
       .then(r => { setPolyOnline(r.ok); return r.json(); })
@@ -164,11 +208,11 @@ export default function ConfigPage() {
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '4px', width: 'fit-content', marginBottom: '2rem' }}>
-        {([['crypto', '🟡 Crypto / Binance'], ['polymarket', '🟠 Polymarket']] as const).map(([t, label]) => (
+        {([['crypto', '🟡 Crypto / Binance'], ['polymarket', '🟠 Polymarket'], ['quant', '🧬 Quant Engine']] as const).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '0.5rem 1.5rem', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 500,
-            background: tab === t ? (t === 'crypto' ? 'rgba(250,173,20,0.2)' : 'rgba(255,107,53,0.2)') : 'transparent',
-            color: tab === t ? (t === 'crypto' ? '#faad14' : '#ff6b35') : '#666',
+            background: tab === t ? (t === 'crypto' ? 'rgba(250,173,20,0.2)' : t === 'polymarket' ? 'rgba(255,107,53,0.2)' : 'rgba(163,139,250,0.2)') : 'transparent',
+            color: tab === t ? (t === 'crypto' ? '#faad14' : t === 'polymarket' ? '#ff6b35' : '#a78bfa') : '#666',
             transition: 'all 0.15s',
           }}>{label}</button>
         ))}
@@ -246,11 +290,10 @@ export default function ConfigPage() {
                 </Field>
                 <Field label="Preferred AI Model">
                   <select style={selectStyle} value={cfg.openRouterModel} onChange={e => setCfg(k => ({ ...k, openRouterModel: e.target.value }))}>
-                    <option value="qwen/qwen3.5-flash-02-23">Qwen 3.5 Flash</option>
-                    <option value="minimax/minimax-m2.5">MiniMax M2.5</option>
-                    <option value="google/gemini-3-flash-preview">Gemini 3 Flash Preview</option>
-                    <option value="deepseek/deepseek-v3.2">DeepSeek V3.2</option>
-                    <option value="meta-llama/llama-3.1-8b-instruct">Llama 3.1 8B</option>
+                    <option value="">Default Model</option>
+                    {AI_MODELS.map(m => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
                   </select>
                 </Field>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: cfg.hasOpenRouter ? '#0ecb81' : '#f6465d', fontSize: '0.85rem' }}>
@@ -394,7 +437,10 @@ export default function ConfigPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
               <Field label="AI Model" hint="Model ที่ใช้วิเคราะห์ market direction">
                 <select style={selectStyle} value={polyCfg.ai_model} onChange={e => setPolyCfg(p => ({ ...p, ai_model: e.target.value }))} disabled={!polyOnline}>
-                  {POLY_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  <option value="">Default (config.py)</option>
+                  {AI_MODELS.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
                 </select>
               </Field>
               <Field label="Max Bet per Trade (USDC)" hint="Kelly fraction คำนวณ size จริงจากค่านี้">
@@ -436,6 +482,123 @@ export default function ConfigPage() {
             <button onClick={handleSavePoly} disabled={polySaving || !polyOnline}
               style={{ padding: '1rem 3rem', background: polySaved ? '#0ecb81' : '#ff6b35', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: polyOnline ? 'pointer' : 'not-allowed', opacity: !polyOnline ? 0.5 : 1, fontSize: '1rem', transition: '0.2s' }}>
               {polySaved ? 'Saved' : polySaving ? 'Saving...' : 'Save Polymarket Config'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* QUANT ENGINE TAB */}
+      {tab === 'quant' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+
+          {/* Status bar */}
+          <div className="glass-panel" style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '4px solid #a78bfa' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <Zap size={20} color="#a78bfa" />
+              <div>
+                <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>Quant Engine</span>
+                <span style={{ marginLeft: '0.75rem', fontSize: '0.8rem', color: quantOnline ? '#0ecb81' : '#f6465d' }}>
+                  {quantOnline === null ? '● Checking...' : quantOnline ? '● Online — localhost:8002' : '● Offline — localhost:8002'}
+                </span>
+              </div>
+            </div>
+            <button onClick={fetchQuantCfg} disabled={quantPinging}
+              style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.8rem', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.82rem', opacity: quantPinging ? 0.6 : 1 }}>
+              <RefreshCw size={13} /> {quantPinging ? 'Checking...' : 'Refresh'}
+            </button>
+          </div>
+
+          {!quantOnline && (
+            <div style={{ padding: '0.9rem 1.2rem', background: 'rgba(246,70,93,0.08)', border: '1px solid rgba(246,70,93,0.3)', borderRadius: '6px', fontSize: '0.85rem', color: '#f6465d' }}>
+              Quant Engine is not running. Start it with: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '0.1rem 0.4rem', borderRadius: '3px' }}>cd packages/quant-engine && uvicorn main:app --port 8002 --reload</code>
+            </div>
+          )}
+
+          {/* Service URLs */}
+          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #a78bfa' }}>
+            <h2 style={{ color: '#a78bfa', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Cpu size={22} color="#a78bfa" /> Service Connections
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+              <Field label="Backend URL" hint="Node.js backend สำหรับ deploy/stop bots">
+                <input type="text" style={inputStyle} value={quantCfg.backend_url}
+                  onChange={e => setQuantCfg(c => ({ ...c, backend_url: e.target.value }))}
+                  disabled={!quantOnline} placeholder="http://localhost:4001" />
+              </Field>
+              <Field label="Strategy AI URL" hint="Python strategy-ai สำหรับ backtest และ register">
+                <input type="text" style={inputStyle} value={quantCfg.strategy_ai_url}
+                  onChange={e => setQuantCfg(c => ({ ...c, strategy_ai_url: e.target.value }))}
+                  disabled={!quantOnline} placeholder="http://localhost:8000" />
+              </Field>
+            </div>
+          </div>
+
+          {/* ETL Settings */}
+          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #13c2c2' }}>
+            <h2 style={{ color: '#13c2c2', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Activity size={22} color="#13c2c2" /> ETL Pipeline
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+              <Field label="ETL Symbols" hint="คั่นด้วย comma เช่น BTCUSDT,ETHUSDT,SOLUSDT">
+                <input type="text" style={inputStyle} value={quantCfg.etl_symbols}
+                  onChange={e => setQuantCfg(c => ({ ...c, etl_symbols: e.target.value }))}
+                  disabled={!quantOnline} placeholder="BTCUSDT,ETHUSDT" />
+              </Field>
+              <Field label="ETL Interval" hint="Kline interval สำหรับ OHLCV data">
+                <select style={selectStyle} value={quantCfg.etl_interval}
+                  onChange={e => setQuantCfg(c => ({ ...c, etl_interval: e.target.value }))}
+                  disabled={!quantOnline}>
+                  {['1m','3m','5m','15m','30m','1h','2h','4h','1d'].map(v => (
+                    <option key={v} value={v}>{v}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </div>
+
+          {/* Decay Settings */}
+          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #f6465d' }}>
+            <h2 style={{ color: '#f6465d', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Brain size={22} color="#f6465d" /> Alpha Decay Threshold
+            </h2>
+            <p style={{ color: '#888', fontSize: '0.85rem', margin: '0 0 1.5rem 0' }}>
+              Strategy ที่มี decay score เกินค่านี้จะถูก retire และส่งไป mutate อัตโนมัติ
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
+              <input type="range" min={30} max={95} step={5} style={{ flex: 1 }}
+                value={quantCfg.decay_threshold}
+                onChange={e => setQuantCfg(c => ({ ...c, decay_threshold: Number(e.target.value) }))}
+                disabled={!quantOnline} />
+              <span style={{ fontSize: '1.5rem', fontWeight: 700, minWidth: '55px', textAlign: 'center',
+                color: quantCfg.decay_threshold >= 80 ? '#0ecb81' : quantCfg.decay_threshold >= 60 ? '#faad14' : '#f6465d' }}>
+                {quantCfg.decay_threshold}
+              </span>
+              <span style={{ fontSize: '0.8rem', color: '#888', minWidth: '80px' }}>
+                {quantCfg.decay_threshold >= 80 ? 'Conservative' : quantCfg.decay_threshold >= 60 ? 'Balanced' : 'Aggressive'}
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginTop: '1rem' }}>
+              {[{ label: 'Conservative', value: 80, desc: 'retire เฉพาะ strategy ที่แย่มาก' },
+                { label: 'Balanced', value: 70, desc: 'default — สมดุลระหว่าง stability และ evolution' },
+                { label: 'Aggressive', value: 50, desc: 'retire เร็ว mutate บ่อย' }].map(p => (
+                <button key={p.value} onClick={() => setQuantCfg(c => ({ ...c, decay_threshold: p.value }))}
+                  disabled={!quantOnline}
+                  style={{ padding: '0.6rem', background: quantCfg.decay_threshold === p.value ? 'rgba(163,139,250,0.15)' : 'rgba(255,255,255,0.02)',
+                    border: `1px solid ${quantCfg.decay_threshold === p.value ? '#a78bfa' : 'var(--border-color)'}`,
+                    borderRadius: '6px', cursor: 'pointer', textAlign: 'left' }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.82rem', color: quantCfg.decay_threshold === p.value ? '#a78bfa' : 'var(--text-main)', marginBottom: '0.2rem' }}>
+                    {p.label} ({p.value})
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#666' }}>{p.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={handleSaveQuant} disabled={quantSaving || !quantOnline}
+              style={{ padding: '1rem 3rem', background: quantSaved ? '#0ecb81' : '#a78bfa', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: quantOnline ? 'pointer' : 'not-allowed', opacity: !quantOnline ? 0.5 : 1, fontSize: '1rem', transition: '0.2s' }}>
+              {quantSaved ? '✓ Saved' : quantSaving ? 'Saving...' : 'Save Quant Config'}
             </button>
           </div>
         </div>

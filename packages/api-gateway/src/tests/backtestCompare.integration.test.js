@@ -67,14 +67,14 @@ vi.mock('../../../bot-engine/src/KlineFetcher.js', () => ({
   fetchKlines: vi.fn(),
 }));
 
-vi.mock('../../../bot-engine/src/SignalEngine.js', () => ({
-  computeSignal: vi.fn(),
+vi.mock('../../../bot-engine/src/PythonStrategyClient.js', () => ({
+  getBatchSignals: vi.fn(),
 }));
 
 // ─── 4. Import modules AFTER mocks ────────────────────────────────────────
 
 import { fetchKlines } from '../../../bot-engine/src/KlineFetcher.js';
-import { computeSignal } from '../../../bot-engine/src/SignalEngine.js';
+import { getBatchSignals } from '../../../bot-engine/src/PythonStrategyClient.js';
 import { createBacktestRoutes } from '../routes/backtestRoutes.js';
 
 // ─── 5. Synthetic kline helpers ────────────────────────────────────────────
@@ -126,6 +126,14 @@ describe('Integration: POST /api/backtest/compare', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     testDb.exec('DELETE FROM backtest_trades; DELETE FROM backtest_results;');
+
+    // Default: one LONG signal at candle 50
+    const signals = Array.from({ length: 1000 }, (_, i) => i === 50 ? 'LONG' : 'NONE');
+    getBatchSignals.mockResolvedValue({
+      signals,
+      confidences: signals.map(s => s === 'NONE' ? 0 : 0.85),
+      metadatas: signals.map(() => ({})),
+    });
   });
 
   it('returns results sorted by totalPnl descending with correct rank fields', async () => {
@@ -145,10 +153,12 @@ describe('Integration: POST /api/backtest/compare', () => {
       .mockResolvedValueOnce(makeTpKlines(120, 100, 3.0))  // config B
       .mockResolvedValueOnce(makeTpKlines(120, 100, 1.5)); // config C
 
-    // Signal: LONG at candle 50 (closes.length === 50), NONE otherwise
-    computeSignal.mockImplementation((closes) =>
-      closes.length === 50 ? 'LONG' : 'NONE'
-    );
+    // Signal: LONG at candle 50, NONE otherwise
+    getBatchSignals.mockResolvedValue({
+      signals: Array.from({ length: 120 }, (_, i) => i === 50 ? 'LONG' : 'NONE'),
+      confidences: Array.from({ length: 120 }, () => 0.8),
+      metadatas: Array.from({ length: 120 }, () => ({})),
+    });
 
     // Act
     const res = await request(app)
@@ -186,9 +196,7 @@ describe('Integration: POST /api/backtest/compare', () => {
     ];
 
     fetchKlines.mockResolvedValue(makeTpKlines(120, 100, 2.0));
-    computeSignal.mockImplementation((closes) =>
-      closes.length === 50 ? 'LONG' : 'NONE'
-    );
+    // getBatchSignals mock provided by beforeEach
 
     const res = await request(app)
       .post('/api/backtest/compare')
@@ -261,9 +269,7 @@ describe('Integration: POST /api/backtest/compare', () => {
     ];
 
     fetchKlines.mockResolvedValue(makeTpKlines(120, 100, 2.0));
-    computeSignal.mockImplementation((closes) =>
-      closes.length === 50 ? 'LONG' : 'NONE'
-    );
+    // getBatchSignals mock provided by beforeEach
 
     const res = await request(app)
       .post('/api/backtest/compare')

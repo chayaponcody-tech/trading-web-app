@@ -70,6 +70,20 @@ export function validatePineScript(input: string): ValidationResult {
   return { isValid: true, error: null };
 }
 
+const OPENROUTER_MODELS = [
+  { id: '', label: '— ใช้ Global Config —' },
+  { id: 'meta-llama/llama-3.1-8b-instruct', label: 'Llama 3.1 8B (default)' },
+  { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash (free)' },
+  { id: 'google/gemini-2.5-pro-exp-03-25:free', label: 'Gemini 2.5 Pro (free)' },
+  { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
+  { id: 'anthropic/claude-3.7-sonnet', label: 'Claude 3.7 Sonnet' },
+  { id: 'openai/gpt-4o', label: 'GPT-4o' },
+  { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
+  { id: 'deepseek/deepseek-r1:free', label: 'DeepSeek R1 (free)' },
+  { id: 'deepseek/deepseek-chat-v3-0324:free', label: 'DeepSeek V3 (free)' },
+  { id: 'qwen/qwen3-235b-a22b:free', label: 'Qwen3 235B (free)' },
+];
+
 // ─── Default state ────────────────────────────────────────────────────────────
 
 const defaultConfig: BacktestConfig = {
@@ -114,6 +128,7 @@ export default function PineImport() {
     error: null,
     strategyName: '',
   });
+  const [selectedModel, setSelectedModel] = useState('');
   const [isRunningBacktest, setIsRunningBacktest] = useState(false);
   const [saveNameError, setSaveNameError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -186,7 +201,7 @@ export default function PineImport() {
       const res = await fetch('/api/pine-script/convert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pineScript: state.pineScript }),
+        body: JSON.stringify({ pineScript: state.pineScript, ...(selectedModel ? { model: selectedModel } : {}) }),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -315,6 +330,31 @@ export default function PineImport() {
             {state.error}
           </div>
         )}
+
+        {/* Model selector */}
+        <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          AI Model
+          <select
+            value={selectedModel}
+            onChange={e => setSelectedModel(e.target.value)}
+            disabled={isConverting}
+            style={{
+              display: 'block',
+              width: '100%',
+              marginTop: '0.3rem',
+              background: 'var(--bg-dark)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-main)',
+              padding: '0.4rem',
+              borderRadius: '4px',
+              fontSize: '0.82rem',
+            }}
+          >
+            {OPENROUTER_MODELS.map(m => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        </label>
 
         {/* Convert button */}
         <button

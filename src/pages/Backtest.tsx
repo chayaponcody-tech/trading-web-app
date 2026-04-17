@@ -1,12 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { createChart, ColorType, LineSeries, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts';
-import type { IChartApi, ISeriesApi, Time, SeriesMarker, ISeriesMarkersPluginApi } from 'lightweight-charts';
+import { useState, useRef, useEffect } from 'react';
 import SymbolSelector from '../components/SymbolSelector';
-import type { Trade, BacktestResult, BacktestConfig, BacktestSummary, CompareResult, OverlayData, OverlayToggleState } from '../utils/backtestUtils';
-import { convertEquityCurve, buildMarkersFromTrades, sortTradesDescending, buildCompareRequestBody } from '../utils/backtestUtils';
-import OverlayRenderer, { OverlayToggleControls } from '../components/OverlayRenderer';
+import CandleChart from '../components/CandleChart';
+import type { CandleChartHandle } from '../components/CandleChart';
+import type { Trade, BacktestResult, BacktestConfig, BacktestSummary, CompareResult, OverlayData } from '../utils/backtestUtils';
+import { buildMarkersFromTrades, sortTradesDescending, buildCompareRequestBody } from '../utils/backtestUtils';
 import MetricsPanel from '../components/MetricsPanel';
-
+import { useStrategyList } from '../hooks/useStrategyList';
+import StrategyParamsForm from '../components/StrategyParamsForm';
+import { getStrategyParams, getDefaultParams } from '../utils/strategyParams';
 
 export default function Backtest() {
   const [symbol, setSymbol] = useState('BTCUSDT');
@@ -14,6 +15,15 @@ export default function Backtest() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [strategy, setStrategy] = useState('EMA');
+  const [strategyParams, setStrategyParams] = useState<Record<string, number | string>>(getDefaultParams('EMA'));
+
+  function handleStrategyChange(key: string) {
+    setStrategy(key);
+    const strategyEntry = strategyList.find(s => (s.id || s.key) === key);
+    const dynamicDefaults = Object.fromEntries((strategyEntry?.parameters || []).map((p: any) => [p.key, p.default]));
+    const staticDefaults = getDefaultParams(key);
+    setStrategyParams({ ...staticDefaults, ...dynamicDefaults });
+  }
   const [tpMultiplier, setTpMultiplier] = useState(2.0);
   const [slMultiplier, setSlMultiplier] = useState(1.0);
   const [trailMult, setTrailMult] = useState(2.5);
@@ -40,178 +50,21 @@ export default function Backtest() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
 
-  type StrategyEntry = { key: string; engine: 'js' | 'python' };
-  const JS_STRATEGIES: StrategyEntry[] = [
-    'EMA', 'RSI', 'BB', 'EMA_RSI', 'BB_RSI', 'EMA_BB_RSI',
-    'GRID', 'AI_SCOUTER', 'EMA_SCALP', 'STOCH_RSI', 'VWAP_SCALP',
-  ].map(key => ({ key, engine: 'js' as const }));
-
-  const [strategyList, setStrategyList] = useState<StrategyEntry[]>(JS_STRATEGIES);
-  const [strategyWarning, setStrategyWarning] = useState<string | null>(null);
-
-  useEffect(() => {
-    // Fetch Python strategies from strategy-ai service and merge with JS strategies
-    fetch('/strategy/list')
-      .then(r => r.json())
-      .then(data => {
-        if (Array.isArray(data.strategies)) {
-          const pythonEntries: StrategyEntry[] = data.strategies.map((s: { key: string }) => ({
-            key: s.key.toUpperCase(),
-            engine: 'python' as const,
-          }));
-          setStrategyList([...JS_STRATEGIES, ...pythonEntries]);
-        }
-      })
-      .catch(() => {
-        // Keep JS-only list and show a warning
-        setStrategyWarning('Python strategy service unavailable — showing JS strategies only');
-      });
-  }, []);
+  const { strategyList, warning: strategyWarning } = useStrategyList();
 
   const [isRunning, setIsRunning] = useState(false);
   const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'charts' | 'log' | 'history' | 'compare'>('charts');
-  const [showMarkers, setShowMarkers] = useState(true);
-  const [storedMarkers, setStoredMarkers] = useState<SeriesMarker<Time>[]>([]);
 
-  // Overlay state (Task 7.1)
   const [overlayData, setOverlayData] = useState<OverlayData>({});
-  const [toggleStates, setToggleStates] = useState<OverlayToggleState>({ ema20: true, ema50: true, bb: true, rsi: true });
-  const [showOverlay, setShowOverlay] = useState(true);
 
-  const chartContainerRef = useRef<HTMLDivElement>(null);
-  const chartRef = useRef<IChartApi | null>(null);
-  const equitySeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
-
-  const candleChartContainerRef = useRef<HTMLDivElement>(null);
-  const candleChartRef = useRef<IChartApi | null>(null);
-  const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-
-  // RSI sub-panel refs (Task 6.1)
-  const rsiChartContainerRef = useRef<HTMLDivElement>(null);
-  const rsiChartRef = useRef<IChartApi | null>(null);
-
-  // The official markers plugin instance
-  const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
-
-  // Apply or remove markers using the plugin
-  const applyMarkers = useCallback((markers: SeriesMarker<Time>[], visible: boolean) => {
-    if (!candleSeriesRef.current) return;
-    if (markersPluginRef.current) {
-      markersPluginRef.current.setMarkers(visible ? markers : []);
-    } else if (visible && markers.length > 0) {
-      markersPluginRef.current = createSeriesMarkers(candleSeriesRef.current, markers);
-    }
-  }, []);
-
-  useEffect(() => {
-    applyMarkers(storedMarkers, showMarkers);
-  }, [showMarkers, storedMarkers, applyMarkers]);
-
-  useEffect(() => {
-    if (!chartContainerRef.current) return;
-    const chart = createChart(chartContainerRef.current, {
-      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#848e9c' },
-      grid: { vertLines: { color: '#2b313f' }, horzLines: { color: '#2b313f' } },
-      timeScale: { timeVisible: true, secondsVisible: false },
-      localization: {
-        locale: 'th-TH',
-        timeFormatter: (time: number) => {
-          return new Date(time * 1000).toLocaleString('th-TH', {
-            hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Bangkok'
-          });
-        },
-      },
-      rightPriceScale: { autoScale: true },
-      autoSize: true,
-    });
-    chartRef.current = chart;
-    equitySeriesRef.current = chart.addSeries(LineSeries, { color: '#0ecb81', lineWidth: 2 });
-
-    if (candleChartContainerRef.current) {
-      const cChart = createChart(candleChartContainerRef.current, {
-        layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#848e9c' },
-        grid: { vertLines: { color: '#2b313f' }, horzLines: { color: '#2b313f' } },
-        timeScale: { timeVisible: true, secondsVisible: false },
-        localization: {
-          locale: 'th-TH',
-          timeFormatter: (time: number) => {
-            return new Date(time * 1000).toLocaleString('th-TH', {
-              hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Bangkok'
-            });
-          },
-        },
-        rightPriceScale: { autoScale: true },
-        autoSize: true,
-      });
-      candleChartRef.current = cChart;
-      candleSeriesRef.current = cChart.addSeries(CandlestickSeries, {
-        upColor: '#0ecb81', downColor: '#f6465d', borderVisible: false, wickUpColor: '#0ecb81', wickDownColor: '#f6465d'
-      });
-
-      let isCrossUpdating = false;
-      const syncByTime = (chart1: IChartApi, chart2: IChartApi) => {
-        chart1.timeScale().subscribeVisibleTimeRangeChange((range) => {
-          if (isCrossUpdating || !range) return;
-          isCrossUpdating = true;
-          try {
-            const logical = chart2.timeScale().getVisibleLogicalRange();
-            if (logical) chart2.timeScale().setVisibleRange(range);
-          } catch { /* ignore if target has no data */ }
-          isCrossUpdating = false;
-        });
-      };
-      syncByTime(chart, cChart);
-      syncByTime(cChart, chart);
-
-      // RSI sub-panel chart (Task 6.1 + 6.3)
-      if (rsiChartContainerRef.current) {
-        const rsiChart = createChart(rsiChartContainerRef.current, {
-          layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#848e9c' },
-          grid: { vertLines: { color: '#2b313f' }, horzLines: { color: '#2b313f' } },
-          timeScale: { timeVisible: true, secondsVisible: false },
-          rightPriceScale: { autoScale: true },
-          autoSize: true,
-        });
-        rsiChartRef.current = rsiChart;
-        // Bidirectional sync with candle chart (Task 6.3)
-        syncByTime(cChart, rsiChart);
-        syncByTime(rsiChart, cChart);
-      }
-    }
-
-    return () => {
-      chart.remove();
-      candleChartRef.current?.remove();
-      rsiChartRef.current?.remove();
-      markersPluginRef.current = null;
-    };
-  }, []);
+  // CandleChart ref — all chart operations go through this
+  const candleChartRef = useRef<CandleChartHandle>(null);
 
   // Auto-preview on symbol/interval change
   useEffect(() => {
-    const fetchPreview = async () => {
-      try {
-        const res = await fetch(`/api/backtest?symbol=${symbol}&interval=${interval}&limit=1000`);
-        const data = await res.json();
-        if (!Array.isArray(data)) return;
-
-        const TZ_OFFSET = 7 * 3600;
-        const cdata = data.map((d: any) => ({
-          time: (Math.floor(d[0] / 1000) + TZ_OFFSET) as Time,
-          open: parseFloat(d[1]), high: parseFloat(d[2]), low: parseFloat(d[3]), close: parseFloat(d[4])
-        }));
-
-        candleSeriesRef.current?.setData(cdata);
-        candleChartRef.current?.timeScale().fitContent();
-        try { candleSeriesRef.current?.applyOptions({ priceScaleId: 'right' }); } catch { /* ignore */ }
-      } catch (err) { console.error('Preview error:', err); }
-    };
-
-    if (candleSeriesRef.current && !isRunning) {
-      fetchPreview();
-    }
+    if (!isRunning) candleChartRef.current?.loadKlines({ symbol, interval });
   }, [symbol, interval, isRunning]);
 
   const loadHistory = async () => {
@@ -223,7 +76,7 @@ export default function Backtest() {
       if (!res.ok) throw new Error('Failed to load history');
       const data = await res.json();
       setHistoryList(data);
-    } catch (e) {
+    } catch {
       setHistoryError('Failed to load backtest history');
     } finally {
       setHistoryLoading(false);
@@ -235,13 +88,13 @@ export default function Backtest() {
       const res = await fetch(`/api/backtest/history/${backtestId}`);
       if (!res.ok) throw new Error('Failed to load history item');
       const result: BacktestResult = await res.json();
-      equitySeriesRef.current?.setData(convertEquityCurve(result.equityCurve));
-      const markers = buildMarkersFromTrades(result.trades);
-      setStoredMarkers(markers);
+      candleChartRef.current?.setEquityCurve(result.equityCurve);
+      candleChartRef.current?.setMarkers(buildMarkersFromTrades(result.trades));
       setBacktestResult(result);
       setOverlayData(result.overlayData ?? {});
+      candleChartRef.current?.loadKlines({ symbol, interval });
       setActiveTab('charts');
-    } catch (e) {
+    } catch {
       setErrorMessage('Failed to load history item');
     }
   };
@@ -279,7 +132,7 @@ export default function Backtest() {
       }
       setCompareResults(body);
       setActiveTab('compare');
-    } catch (e) {
+    } catch {
       setErrorMessage('Network error — please check your connection');
     } finally {
       setIsRunning(false);
@@ -297,19 +150,17 @@ export default function Backtest() {
       trailActivation,
       leverage,
       capital,
+      forceEngine: 'python',
+      ...strategyParams,
       ...(startDate ? { startDate } : {}),
       ...(endDate ? { endDate } : {}),
     };
 
-    // Clear previous state before fetch
     setBacktestResult(null);
     setErrorMessage(null);
-    markersPluginRef.current?.setMarkers([]);
-    setStoredMarkers([]);
-    equitySeriesRef.current?.setData([]);
+    candleChartRef.current?.clearMarkers();
+    candleChartRef.current?.clearEquityCurve();
     setOverlayData({});
-    setToggleStates({ ema20: true, ema50: true, bb: true, rsi: true });
-
     setIsRunning(true);
     setActiveTab('charts');
 
@@ -333,30 +184,11 @@ export default function Backtest() {
       }
 
       const result: BacktestResult = body;
-      equitySeriesRef.current?.setData(convertEquityCurve(result.equityCurve));
-      const markers = buildMarkersFromTrades(result.trades);
-      setStoredMarkers(markers);
+      candleChartRef.current?.setEquityCurve(result.equityCurve);
+      candleChartRef.current?.setMarkers(buildMarkersFromTrades(result.trades));
       setBacktestResult(result);
       setOverlayData(result.overlayData ?? {});
-
-      // Re-fetch candle data for the backtest date range so Y-axis shows correct prices
-      try {
-        const params = new URLSearchParams({ symbol, interval, limit: '1500' });
-        if (config.startDate) params.set('startDate', config.startDate);
-        if (config.endDate)   params.set('endDate', config.endDate);
-        const kRes = await fetch(`/api/backtest?${params}`);
-        const kData = await kRes.json();
-        if (Array.isArray(kData) && kData.length > 0) {
-          const TZ_OFFSET = 7 * 3600;
-          const cdata = kData.map((d: any) => ({
-            time: (Math.floor(d[0] / 1000) + TZ_OFFSET) as Time,
-            open: parseFloat(d[1]), high: parseFloat(d[2]),
-            low: parseFloat(d[3]),  close: parseFloat(d[4]),
-          }));
-          candleSeriesRef.current?.setData(cdata);
-          candleChartRef.current?.timeScale().fitContent();
-        }
-      } catch { /* non-critical — chart still works without candle refresh */ }
+      candleChartRef.current?.loadKlines({ symbol, interval, startDate: config.startDate, endDate: config.endDate });
     } catch (e) {
       console.error(e);
       setErrorMessage('Network error — please check your connection');
@@ -365,12 +197,11 @@ export default function Backtest() {
     }
   };
 
-  // Metrics display helpers — show '--' when no result or totalTrades === 0
   const hasResult = backtestResult !== null && backtestResult.totalTrades > 0;
   const sign = (n: number) => (n >= 0 ? '+' : '');
 
   const netPnlDisplay = hasResult
-    ? `${sign(backtestResult!.totalPnl)}$${backtestResult!.totalPnl.toFixed(2)} (${sign(backtestResult!.netPnlPct)}${backtestResult!.netPnlPct.toFixed(1)}%)`
+    ? `${sign(backtestResult!.totalPnl)}${backtestResult!.totalPnl.toFixed(2)} (${sign(backtestResult!.netPnlPct)}${backtestResult!.netPnlPct.toFixed(1)}%)`
     : '--';
   const winRateDisplay = hasResult
     ? `${backtestResult!.winRate.toFixed(1)}% (${backtestResult!.totalTrades}T)`
@@ -379,7 +210,7 @@ export default function Backtest() {
     ? `${(backtestResult!.maxDrawdown * 100).toFixed(2)}%`
     : '--';
   const avgWlDisplay = hasResult
-    ? `+$${backtestResult!.avgWin.toFixed(2)} / -$${backtestResult!.avgLoss.toFixed(2)}`
+    ? `+${backtestResult!.avgWin.toFixed(2)} / -${backtestResult!.avgLoss.toFixed(2)}`
     : '--';
 
   return (
@@ -390,7 +221,7 @@ export default function Backtest() {
         <SymbolSelector value={symbol} onSelect={setSymbol} />
         <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Timeframe
           <select value={interval} onChange={e => setIntervalTime(e.target.value)} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', borderRadius: '4px', marginTop: '0.2rem' }}>
-            <option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1d">1d</option>
+            <option value="1m">1m</option><option value="5m">5m</option><option value="15m">15m</option><option value="1h">1h</option><option value="4h">4h</option><option value="1d">1d</option>
           </select>
         </label>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
@@ -402,7 +233,7 @@ export default function Backtest() {
           </label>
         </div>
         <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Strategy
-          <select value={strategy} onChange={e => setStrategy(e.target.value)} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', borderRadius: '4px', marginTop: '0.2rem' }}>
+          <select value={strategy} onChange={e => handleStrategyChange(e.target.value)} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', borderRadius: '4px', marginTop: '0.2rem' }}>
             {strategyList.map(s => (
               <option key={s.key} value={s.key}>{s.key}{s.engine === 'python' ? ' [py]' : ''}</option>
             ))}
@@ -411,40 +242,48 @@ export default function Backtest() {
             <div style={{ fontSize: '0.7rem', color: '#f6a609', marginTop: '0.2rem' }}>⚠ {strategyWarning}</div>
           )}
         </label>
-        {strategy === 'GRID' ? (
-          <div style={{ border: '1px solid var(--border-color)', padding: '0.5rem', borderRadius: '4px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Upper
-              <input type="number" value={gridUpper} onChange={e => setGridUpper(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-            </label>
-            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Lower
-              <input type="number" value={gridLower} onChange={e => setGridLower(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-            </label>
-            <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Grids
-              <input type="number" value={gridQuantity} onChange={e => setGridQuantity(parseInt(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-            </label>
-          </div>
-        ) : (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>TP (ATR×)
-                <input type="number" step="0.1" value={tpMultiplier} onChange={e => setTpMultiplier(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-              </label>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SL (ATR×)
-                <input type="number" step="0.1" value={slMultiplier} onChange={e => setSlMultiplier(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-              </label>
+
+        {/* Strategy-specific params */}
+        {(() => {
+          const strategyEntry = strategyList.find(s => (s.id || s.key) === strategy);
+          const dynamicParams = strategyEntry?.parameters || [];
+          const staticParams = getStrategyParams(strategy);
+          const allParams = [...staticParams, ...dynamicParams];
+
+          if (allParams.length === 0) return null;
+
+          return (
+            <div style={{ border: '1px solid var(--border-color)', borderRadius: '4px', padding: '0.5rem' }}>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.4rem', fontWeight: 600 }}>Strategy Params</div>
+              <StrategyParamsForm
+                params={allParams}
+                values={strategyParams}
+                onChange={(key, val) => setStrategyParams(p => ({ ...p, [key]: val }))}
+                disabled={isRunning}
+              />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} title="Trailing stop distance (ATR×) — larger = wider trail">Trail (ATR×)
-                <input type="number" step="0.5" min="0.5" value={trailMult} onChange={e => setTrailMult(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-              </label>
-              <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} title="Profit required before trailing activates (ATR×)">Activate (ATR×)
-                <input type="number" step="0.5" min="0" value={trailActivation} onChange={e => setTrailActivation(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
-              </label>
-            </div>            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Leverage
-              <input type="number" min="1" max="125" value={leverage} onChange={e => setLeverage(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', marginTop: '0.2rem' }} />
-            </label>
-          </>
-        )}
+          );
+        })()}
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>TP (ATR×)
+            <input type="number" step="0.1" value={tpMultiplier} onChange={e => setTpMultiplier(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+          </label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>SL (ATR×)
+            <input type="number" step="0.1" value={slMultiplier} onChange={e => setSlMultiplier(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+          </label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} title="Trailing stop distance (ATR×) — larger = wider trail">Trail (ATR×)
+            <input type="number" step="0.5" min="0.5" value={trailMult} onChange={e => setTrailMult(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+          </label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }} title="Profit required before trailing activates (ATR×)">Activate (ATR×)
+            <input type="number" step="0.5" min="0" value={trailActivation} onChange={e => setTrailActivation(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.3rem' }} />
+          </label>
+        </div>
+        <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Leverage
+          <input type="number" min="1" max="125" value={leverage} onChange={e => setLeverage(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', marginTop: '0.2rem' }} />
+        </label>
         {/* Compare Mode Toggle */}
         <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.4rem', cursor: 'pointer' }}>
           <input type="checkbox" checked={compareMode} onChange={e => setCompareMode(e.target.checked)} />
@@ -493,7 +332,7 @@ export default function Backtest() {
       {/* Main Content */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', paddingRight: '0.25rem' }}>
         {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: '0.6rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
           {[
             { label: 'Net PnL', value: netPnlDisplay, color: hasResult && backtestResult!.totalPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)' },
             { label: 'Win Rate', value: winRateDisplay, color: '#fff' },
@@ -503,12 +342,12 @@ export default function Backtest() {
             { label: 'Avg W/L', value: avgWlDisplay, color: '#fff' },
             { label: 'Max Cons. Loss', value: hasResult ? String(backtestResult!.maxConsecutiveLosses) : '--', color: '#fff' },
           ].map((stat, i) => (
-            <div key={i} className="glass-panel" style={{ padding: '0.6rem', textAlign: 'center' }}>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>{stat.label}</div>
-              <div style={{ fontSize: '1rem', fontWeight: 'bold', color: stat.color }}>{stat.value}</div>
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.25rem 0.6rem' }}>
+              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{stat.label}</span>
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: stat.color }}>{stat.value}</span>
             </div>
           ))}
-          <div className="glass-panel" style={{ padding: '0.6rem' }}>
+          <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.25rem 0.6rem' }}>
             <MetricsPanel trades={backtestResult?.trades ?? []} avgWin={backtestResult?.avgWin ?? 0} avgLoss={backtestResult?.avgLoss ?? 0} />
           </div>
         </div>
@@ -530,48 +369,12 @@ export default function Backtest() {
           <button onClick={() => setActiveTab('compare')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'compare' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'compare' ? '2px solid var(--accent-primary)' : 'none' }}>Compare</button>
         </div>
 
-        {/* Charts */}
-        <div style={{ display: activeTab === 'charts' ? 'flex' : 'none', flexDirection: 'column', gap: '1rem', position: 'relative' }}>
+        {/* Charts Tab */}
+        {activeTab === 'charts' && (
           <div className="glass-panel" style={{ padding: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-              <h5 className="m-0">Market</h5>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                <OverlayToggleControls overlayData={overlayData} toggleStates={toggleStates} onToggleChange={(key, value) => setToggleStates(prev => ({ ...prev, [key]: value }))} />
-                <button onClick={() => setShowMarkers(v => !v)} style={{ background: showMarkers ? 'var(--accent-primary)' : 'transparent', color: showMarkers ? '#fff' : 'var(--text-main)', border: '1px solid #444', padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer' }}>
-                  {showMarkers ? 'Hide Markers' : 'Show Markers'}
-                </button>
-              </div>
-            </div>
-            <div style={{ height: '320px', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div ref={candleChartContainerRef} style={{ width: '100%', height: '100%' }} />
-            </div>
+            <CandleChart ref={candleChartRef} symbol={symbol} interval={interval} trades={backtestResult?.trades ?? []} overlayData={overlayData} equityCurve={backtestResult?.equityCurve} height="calc(100vh - 340px)" />
           </div>
-          {/* OverlayRenderer — non-rendering, manages series lifecycle (Task 7.2) */}
-          <OverlayRenderer
-            chart={candleChartRef.current}
-            candleSeries={candleSeriesRef.current}
-            rsiChartRef={rsiChartRef}
-            overlayData={overlayData}
-            trades={backtestResult?.trades ?? []}
-            strategy={strategy}
-            showMarkers={showMarkers}
-            toggleStates={toggleStates}
-            onToggleChange={(key, value) => setToggleStates(prev => ({ ...prev, [key]: value }))}
-          />
-          {/* RSI Sub-Panel (Task 7.4) */}
-          <div className="glass-panel" style={{ padding: '1rem', display: overlayData.rsi && overlayData.rsi.length > 0 ? 'block' : 'none' }}>
-            <h5 className="m-0" style={{ marginBottom: '0.5rem' }}>RSI</h5>
-            <div style={{ height: '120px', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div ref={rsiChartContainerRef} style={{ width: '100%', height: '100%' }} />
-            </div>
-          </div>
-          <div className="glass-panel" style={{ padding: '1rem' }}>
-            <h5 className="m-0" style={{ marginBottom: '0.5rem' }}>Portfolio Equity Curve</h5>
-            <div style={{ height: '180px', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
-              <div ref={chartContainerRef} style={{ width: '100%', height: '100%' }} />
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* Trade Log */}
         <div className="glass-panel" style={{ display: activeTab === 'log' ? 'block' : 'none' }}>
@@ -600,7 +403,7 @@ export default function Backtest() {
                     <td style={{ color: trade.type === 'LONG' ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>{trade.type}</td>
                     <td>${trade.entryPrice.toFixed(2)}</td>
                     <td>${trade.exitPrice.toFixed(2)}</td>
-                    <td style={{ textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{trade.positionSize != null ? `$${trade.positionSize.toFixed(0)}` : '�'}</td>
+                    <td style={{ textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.8rem' }}>{trade.positionSize != null ? `${trade.positionSize.toFixed(0)}` : '—'}</td>
                     <td style={{ fontSize: '0.75rem', color: 'var(--text-muted)', maxWidth: '200px' }}>{trade.entryReason ?? '—'}</td>
                     <td style={{ textAlign: 'right', fontSize: '0.8rem', color: trade.entryConfidence != null ? (trade.entryConfidence >= 0.7 ? 'var(--profit-color)' : trade.entryConfidence >= 0.5 ? '#f6a609' : 'var(--loss-color)') : 'var(--text-muted)' }}>
                       {trade.entryConfidence != null ? `${(trade.entryConfidence * 100).toFixed(0)}%` : '—'}
@@ -699,7 +502,7 @@ export default function Backtest() {
                       <td style={{ padding: '0.5rem', fontWeight: 'bold' }}>#{result.rank}</td>
                       <td>{result.configLabel}</td>
                       <td style={{ textAlign: 'right', color: result.error ? 'var(--text-muted)' : result.totalPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 'bold' }}>
-                        {result.error ? '--' : `${result.totalPnl >= 0 ? '+' : ''}$${result.totalPnl.toFixed(2)}`}
+                        {result.error ? '--' : `${result.totalPnl >= 0 ? '+' : ''}${result.totalPnl.toFixed(2)}`}
                       </td>
                       <td style={{ textAlign: 'right' }}>{result.error ? '--' : `${result.winRate.toFixed(1)}%`}</td>
                       <td style={{ textAlign: 'right' }}>{result.error ? '--' : result.sharpeRatio.toFixed(2)}</td>

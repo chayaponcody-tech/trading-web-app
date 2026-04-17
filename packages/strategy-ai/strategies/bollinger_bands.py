@@ -1,51 +1,33 @@
-import numpy as np
+import pandas as pd
+import ta
 from base_strategy import BaseStrategy
 
 
 class BollingerBandsStrategy(BaseStrategy):
-    """BB Mean Reversion (20, 2σ)"""
+    """BB Mean Reversion (20, 2σ) — powered by ta"""
 
-    def compute_signal(self, closes, highs, lows, volumes, params=None) -> dict:
+    def populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
         p = params or {}
         period = int(p.get("bbPeriod", 20))
         std_dev = float(p.get("bbStdDev", 2))
 
-        arr = np.array(closes, dtype=float)
-        if len(arr) < period + 1:
-            return {"signal": "NONE", "stoploss": None, "metadata": {}}
+        bb = ta.volatility.BollingerBands(df["close"], window=period, window_dev=std_dev)
+        df["upper"] = bb.bollinger_hband()
+        df["lower"] = bb.bollinger_lband()
+        return df
 
-        upper, lower = self._bb(arr, period, std_dev)
+    def populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        prev_price = df["close"].shift(1)
+        prev_upper = df["upper"].shift(1)
+        prev_lower = df["lower"].shift(1)
 
-        prev, curr = arr[-2], arr[-1]
-        prev_upper, curr_upper = upper[-2], upper[-1]
-        prev_lower, curr_lower = lower[-2], lower[-1]
+        df["signal"] = "NONE"
+        # Cross UP from lower (Buy)
+        df.loc[(prev_price <= prev_lower) & (df["close"] > df["lower"]), "signal"] = "LONG"
+        # Cross DOWN from upper (Sell)
+        df.loc[(prev_price >= prev_upper) & (df["close"] < df["upper"]), "signal"] = "SHORT"
 
-        if prev <= prev_lower and curr > curr_lower:
-            signal = "LONG"
-        elif prev >= prev_upper and curr < curr_upper:
-            signal = "SHORT"
-        else:
-            signal = "NONE"
-
-        return {
-            "signal": signal,
-            "stoploss": None,
-            "metadata": {
-                "upper": round(float(curr_upper), 6),
-                "lower": round(float(curr_lower), 6),
-                "price": round(float(curr), 6),
-            },
-        }
+        return df
 
     def get_metadata(self) -> dict:
-        return {"name": "BollingerBands", "description": "BB Mean Reversion (20, 2σ)", "version": "1.0.0"}
-
-    def _bb(self, arr: np.ndarray, period: int, std_dev: float):
-        upper, lower = np.empty(len(arr)), np.empty(len(arr))
-        for i in range(period - 1, len(arr)):
-            window = arr[i - period + 1 : i + 1]
-            mid = np.mean(window)
-            sd = np.std(window)
-            upper[i] = mid + std_dev * sd
-            lower[i] = mid - std_dev * sd
-        return upper, lower
+        return {"name": "BollingerBands", "description": "BB Mean Reversion (20, 2σ)", "version": "3.0.0"}

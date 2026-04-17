@@ -1,44 +1,31 @@
-import numpy as np
+import pandas as pd
+import ta
 from base_strategy import BaseStrategy
 
 
 class RSIStrategy(BaseStrategy):
-    """RSI Overbought/Oversold (30/70)"""
+    """RSI Overbought/Oversold (30/70) — powered by ta"""
 
-    def compute_signal(self, closes, highs, lows, volumes, params=None) -> dict:
+    def populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
         p = params or {}
         period = int(p.get("rsiPeriod", 14))
+        df["rsi"] = ta.momentum.rsi(df["close"], window=period)
+        return df
+
+    def populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        p = params or {}
         overbought = float(p.get("rsiOverbought", 70))
         oversold = float(p.get("rsiOversold", 30))
 
-        arr = np.array(closes, dtype=float)
-        rsi = self._rsi(arr, period)
-        if len(rsi) < 2:
-            return {"signal": "NONE", "stoploss": None, "metadata": {}}
+        prev_rsi = df["rsi"].shift(1)
+        df["signal"] = "NONE"
 
-        prev, curr = rsi[-2], rsi[-1]
+        # Cross above oversold (Buy)
+        df.loc[(prev_rsi <= oversold) & (df["rsi"] > oversold), "signal"] = "LONG"
+        # Cross below overbought (Sell)
+        df.loc[(prev_rsi >= overbought) & (df["rsi"] < overbought), "signal"] = "SHORT"
 
-        if prev <= oversold and curr > oversold:
-            signal = "LONG"
-        elif prev >= overbought and curr < overbought:
-            signal = "SHORT"
-        else:
-            signal = "NONE"
-
-        return {
-            "signal": signal,
-            "stoploss": None,
-            "metadata": {"rsi": round(float(curr), 2), "overbought": overbought, "oversold": oversold},
-        }
+        return df
 
     def get_metadata(self) -> dict:
-        return {"name": "RSIStrategy", "description": "RSI Overbought/Oversold", "version": "1.0.0"}
-
-    def _rsi(self, arr: np.ndarray, period: int) -> np.ndarray:
-        deltas = np.diff(arr)
-        gains = np.where(deltas > 0, deltas, 0.0)
-        losses = np.where(deltas < 0, -deltas, 0.0)
-        avg_gain = np.convolve(gains, np.ones(period) / period, mode="valid")
-        avg_loss = np.convolve(losses, np.ones(period) / period, mode="valid")
-        rs = np.where(avg_loss == 0, 100.0, avg_gain / (avg_loss + 1e-10))
-        return 100 - (100 / (1 + rs))
+        return {"name": "RSIStrategy", "description": "RSI Overbought/Oversold", "version": "3.0.0"}

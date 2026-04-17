@@ -1,4 +1,4 @@
-import { EMA } from 'technicalindicators';
+import { emaCalc } from '../../../shared/indicators.js';
 
 export const EMACross = {
   name: 'EMA_CROSS',
@@ -13,8 +13,8 @@ export const EMACross = {
     const p1 = params.fastPeriod || 20;
     const p2 = params.slowPeriod || 50;
     
-    const fast = EMA.calculate({ period: p1, values: closes });
-    const slow = EMA.calculate({ period: p2, values: closes });
+    const fast = emaCalc(closes, p1);
+    const slow = emaCalc(closes, p2);
     
     if (fast.length < 2 || slow.length < 2) return 'NONE';
     
@@ -46,8 +46,8 @@ export const EMACross = {
     const p2 = params.slowPeriod || 50;
     if (closes.length < p2) return `กำลังรวบรวมข้อมูล EMA (${p1}/${p2})...`;
     
-    const fast = EMA.calculate({ period: p1, values: closes });
-    const slow = EMA.calculate({ period: p2, values: closes });
+    const fast = emaCalc(closes, p1);
+    const slow = emaCalc(closes, p2);
     
     if (!fast.length || !slow.length) return "กำลังคำนวณเส้นความถี่ EMA...";
     

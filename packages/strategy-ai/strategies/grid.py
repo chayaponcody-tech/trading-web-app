@@ -1,50 +1,30 @@
-import numpy as np
+import pandas as pd
+import ta
 from base_strategy import BaseStrategy
 
 
 class GridStrategy(BaseStrategy):
     """Grid Mean Reversion — Buy Low / Sell High"""
 
-    def compute_signal(self, closes, highs, lows, volumes, params=None) -> dict:
-        p = params or {}
-        arr = np.array(closes, dtype=float)
-        curr = float(arr[-1])
+    def populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        df["ema20"] = ta.trend.ema_indicator(df["close"], window=20)
+        df["dev"] = (df["close"] - df["ema20"]) / df["ema20"]
+        return df
 
-        grid_upper = p.get("gridUpper")
-        grid_lower = p.get("gridLower")
+    def populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        gu = params.get("gridUpper")
+        gl = params.get("gridLower")
 
-        if grid_upper and grid_lower:
-            if curr <= float(grid_lower):
-                signal = "LONG"
-            elif curr >= float(grid_upper):
-                signal = "SHORT"
-            else:
-                signal = "NONE"
+        df["signal"] = "NONE"
+        if gu and gl:
+            df.loc[df["close"] <= float(gl), "signal"] = "LONG"
+            df.loc[df["close"] >= float(gu), "signal"] = "SHORT"
         else:
-            # Fallback: EMA20 deviation
-            if len(arr) < 20:
-                return {"signal": "NONE", "stoploss": None, "metadata": {}}
-            k = 2.0 / 21
-            ema = arr[0]
-            for c in arr[1:]:
-                ema = c * k + ema * (1 - k)
-            dev = (curr - ema) / ema
-            if dev <= -0.01:
-                signal = "LONG"
-            elif dev >= 0.01:
-                signal = "SHORT"
-            else:
-                signal = "NONE"
-
-        return {
-            "signal": signal,
-            "stoploss": None,
-            "metadata": {
-                "price": round(curr, 6),
-                "grid_upper": grid_upper,
-                "grid_lower": grid_lower,
-            },
-        }
+            # Fallback: EMA deviation
+            df.loc[df["dev"] <= -0.01, "signal"] = "LONG"
+            df.loc[df["dev"] >= 0.01, "signal"] = "SHORT"
+            
+        return df
 
     def get_metadata(self) -> dict:
-        return {"name": "GRID", "description": "Grid Mean Reversion", "version": "1.0.0"}
+        return {"name": "GRID", "description": "Grid Mean Reversion", "version": "3.0.0"}

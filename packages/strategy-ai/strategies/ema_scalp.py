@@ -1,45 +1,27 @@
-import numpy as np
+import pandas as pd
+import ta
 from base_strategy import BaseStrategy
 
 
 class EMAScalpStrategy(BaseStrategy):
-    """EMA 3/8 Scalping — เข้าเร็ว ออกเร็ว"""
+    """EMA 3/8 Scalping — powered by ta"""
 
-    def compute_signal(self, closes, highs, lows, volumes, params=None) -> dict:
+    def populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
         p = params or {}
         fast_p = int(p.get("fastPeriod", 3))
         slow_p = int(p.get("slowPeriod", 8))
+        df["ema_fast"] = ta.trend.ema_indicator(df["close"], window=fast_p)
+        df["ema_slow"] = ta.trend.ema_indicator(df["close"], window=slow_p)
+        return df
 
-        arr = np.array(closes, dtype=float)
-        if len(arr) < slow_p + 1:
-            return {"signal": "NONE", "stoploss": None, "metadata": {}}
+    def populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        prev_fast = df["ema_fast"].shift(1)
+        prev_slow = df["ema_slow"].shift(1)
 
-        fast = self._ema_series(arr, fast_p)
-        slow = self._ema_series(arr, slow_p)
-
-        if fast[-2] <= slow[-2] and fast[-1] > slow[-1]:
-            signal = "LONG"
-        elif fast[-2] >= slow[-2] and fast[-1] < slow[-1]:
-            signal = "SHORT"
-        else:
-            signal = "NONE"
-
-        return {
-            "signal": signal,
-            "stoploss": None,
-            "metadata": {
-                "ema_fast": round(float(fast[-1]), 6),
-                "ema_slow": round(float(slow[-1]), 6),
-            },
-        }
+        df["signal"] = "NONE"
+        df.loc[(prev_fast <= prev_slow) & (df["ema_fast"] > df["ema_slow"]), "signal"] = "LONG"
+        df.loc[(prev_fast >= prev_slow) & (df["ema_fast"] < df["ema_slow"]), "signal"] = "SHORT"
+        return df
 
     def get_metadata(self) -> dict:
-        return {"name": "EMA_SCALP", "description": "EMA 3/8 Scalp", "version": "1.0.0"}
-
-    def _ema_series(self, data: np.ndarray, period: int) -> np.ndarray:
-        k = 2.0 / (period + 1)
-        result = np.empty(len(data))
-        result[0] = data[0]
-        for i in range(1, len(data)):
-            result[i] = data[i] * k + result[i - 1] * (1 - k)
-        return result
+        return {"name": "EMA_SCALP", "description": "EMA 3/8 Scalp", "version": "3.0.0"}

@@ -34,7 +34,8 @@ vi.mock('../../data-layer/src/repositories/configRepository.js', () => ({
   loadBinanceConfig: vi.fn(() => ({ strategyAiUrl: 'http://localhost:8000' })),
 }));
 
-import { applySlippage, computePositionSize, computeATR, computeTPSL, runWalkForward } from '../Backtester.js';
+import { applySlippage, computePositionSize, computeTPSL, runWalkForward } from '../Backtester.js';
+import { computeATR } from '../../../shared/indicators.js';
 import { fetchKlines } from '../KlineFetcher.js';
 import { optimizeStrategy } from '../PythonStrategyClient.js';
 import { TuningService } from '../TuningService.js';

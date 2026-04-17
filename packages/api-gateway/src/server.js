@@ -22,6 +22,9 @@ import { createPortfolioRoutes } from './routes/portfolioRoutes.js';
 import { createWalletRoutes }    from './routes/walletRoutes.js';
 import { createBacktestRoutes }  from './routes/backtestRoutes.js';
 import { createPineScriptRoutes } from './routes/pineScriptRoutes.js';
+import { createStrategyRoutes }  from './routes/strategyRoutes.js';
+import { createMarketRoutes }    from './routes/marketRoutes.js';
+import { createResearchRoutes }  from './routes/researchRoutes.js';
 import { errorHandler }          from './middleware/errorHandler.js';
 
 import { setupSwagger }          from './swagger.js';
@@ -111,6 +114,9 @@ app.use('/api/portfolio', createPortfolioRoutes(portfolioManagers, { botManager,
 app.use('/api/wallet',    createWalletRoutes());
 app.use('/api/backtest', createBacktestRoutes(exchange));
 app.use('/api/pine-script', createPineScriptRoutes(exchange));
+app.use('/api/strategies', createStrategyRoutes(exchange));
+app.use('/api/market',     createMarketRoutes(exchange));
+app.use('/api/research',   createResearchRoutes());
 
 
 // Backwards-compat aliases (legacy frontend calls these paths)

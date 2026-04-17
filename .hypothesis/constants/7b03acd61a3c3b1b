@@ -1,0 +1,4 @@
+# file: D:\Crypto\trading-web-app\packages\quant-engine\core\registry.py
+# hypothesis_version: 6.151.12
+
+['ApprovedStrategy', 'approved_at', 'backtest_metrics', 'bot_id', 'lineage_id', 'mutation_count', 'python_code', 'status', 'strategy_key', 'updated_at']

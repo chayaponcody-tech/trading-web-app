@@ -1,121 +1,99 @@
-import numpy as np
+import pandas as pd
+import ta
 from base_strategy import BaseStrategy
 
 
-def _ema_series(arr: np.ndarray, period: int) -> np.ndarray:
-    k = 2.0 / (period + 1)
-    result = np.empty(len(arr))
-    result[0] = arr[0]
-    for i in range(1, len(arr)):
-        result[i] = arr[i] * k + result[i - 1] * (1 - k)
-    return result
-
-
-def _rsi_last(arr: np.ndarray, period: int) -> float:
-    deltas = np.diff(arr)
-    gains = np.where(deltas > 0, deltas, 0.0)
-    losses = np.where(deltas < 0, -deltas, 0.0)
-    avg_gain = np.mean(gains[-period:]) if len(gains) >= period else 0.0
-    avg_loss = np.mean(losses[-period:]) if len(losses) >= period else 1e-10
-    return 100 - (100 / (1 + avg_gain / (avg_loss + 1e-10)))
-
-
-def _ema_cross(arr, params):
-    fast_p = int(params.get("fastPeriod", 20))
-    slow_p = int(params.get("slowPeriod", 50))
-    if len(arr) < slow_p + 1:
-        return "NONE", None, None
-    fast = _ema_series(arr, fast_p)
-    slow = _ema_series(arr, slow_p)
-    if fast[-2] <= slow[-2] and fast[-1] > slow[-1]:
-        return "LONG", fast[-1], slow[-1]
-    if fast[-2] >= slow[-2] and fast[-1] < slow[-1]:
-        return "SHORT", fast[-1], slow[-1]
-    return "NONE", fast[-1], slow[-1]
-
-
-def _bb_signal(arr, params):
-    period = int(params.get("bbPeriod", 20))
-    std_dev = float(params.get("bbStd", 2))
-    if len(arr) < period:
-        return "NONE"
-    window = arr[-period:]
-    mid = np.mean(window)
-    sd = np.std(window)
-    upper = mid + std_dev * sd
-    lower = mid - std_dev * sd
-    curr = arr[-1]
-    if curr < lower:
-        return "LONG"
-    if curr > upper:
-        return "SHORT"
-    return "NONE"
-
-
 class EMARSIStrategy(BaseStrategy):
-    """EMA Cross confirmed by RSI not being extreme"""
+    """EMA Cross confirmed by RSI not being extreme — powered by ta"""
 
-    def compute_signal(self, closes, highs, lows, volumes, params=None) -> dict:
+    def populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
         p = params or {}
-        arr = np.array(closes, dtype=float)
-        ema_sig, _, _ = _ema_cross(arr, p)
-        rsi = _rsi_last(arr, int(p.get("rsiPeriod", 14)))
+        fast_p = int(p.get("fastPeriod", 20))
+        slow_p = int(p.get("slowPeriod", 50))
+        rsi_p = int(p.get("rsiPeriod", 14))
 
-        if ema_sig == "LONG" and rsi < 70:
-            signal = "LONG"
-        elif ema_sig == "SHORT" and rsi > 30:
-            signal = "SHORT"
-        else:
-            signal = "NONE"
+        df["ema_fast"] = ta.trend.ema_indicator(df["close"], window=fast_p)
+        df["ema_slow"] = ta.trend.ema_indicator(df["close"], window=slow_p)
+        df["rsi"] = ta.momentum.rsi(df["close"], window=rsi_p)
+        return df
 
-        return {"signal": signal, "stoploss": None, "metadata": {"rsi": round(rsi, 2)}}
+    def populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        prev_fast = df["ema_fast"].shift(1)
+        prev_slow = df["ema_slow"].shift(1)
+
+        ema_long = (prev_fast <= prev_slow) & (df["ema_fast"] > df["ema_slow"])
+        ema_short = (prev_fast >= prev_slow) & (df["ema_fast"] < df["ema_slow"])
+
+        df["signal"] = "NONE"
+        df.loc[ema_long & (df["rsi"] < 70), "signal"] = "LONG"
+        df.loc[ema_short & (df["rsi"] > 30), "signal"] = "SHORT"
+        return df
 
     def get_metadata(self) -> dict:
-        return {"name": "EMA_RSI", "description": "EMA Cross + RSI confirmation", "version": "1.0.0"}
+        return {"name": "EMA_RSI", "description": "EMA Cross + RSI confirmation", "version": "3.0.0"}
 
 
 class BBRSIStrategy(BaseStrategy):
-    """BB Mean Reversion confirmed by RSI"""
+    """BB Mean Reversion confirmed by RSI — powered by ta"""
 
-    def compute_signal(self, closes, highs, lows, volumes, params=None) -> dict:
+    def populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
         p = params or {}
-        arr = np.array(closes, dtype=float)
-        bb_sig = _bb_signal(arr, p)
-        rsi = _rsi_last(arr, int(p.get("rsiPeriod", 14)))
+        bb_p = int(p.get("bbPeriod", 20))
+        bb_std = float(p.get("bbStd", 2))
+        rsi_p = int(p.get("rsiPeriod", 14))
+
+        bb = ta.volatility.BollingerBands(df["close"], window=bb_p, window_dev=bb_std)
+        df["upper"] = bb.bollinger_hband()
+        df["lower"] = bb.bollinger_lband()
+        df["rsi"] = ta.momentum.rsi(df["close"], window=rsi_p)
+        return df
+
+    def populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        p = params or {}
         oversold = float(p.get("rsiBuy", 30))
         overbought = float(p.get("rsiSell", 70))
 
-        if bb_sig == "LONG" and rsi < oversold:
-            signal = "LONG"
-        elif bb_sig == "SHORT" and rsi > overbought:
-            signal = "SHORT"
-        else:
-            signal = "NONE"
-
-        return {"signal": signal, "stoploss": None, "metadata": {"rsi": round(rsi, 2), "bb": bb_sig}}
+        df["signal"] = "NONE"
+        df.loc[(df["close"] < df["lower"]) & (df["rsi"] < oversold), "signal"] = "LONG"
+        df.loc[(df["close"] > df["upper"]) & (df["rsi"] > overbought), "signal"] = "SHORT"
+        return df
 
     def get_metadata(self) -> dict:
-        return {"name": "BB_RSI", "description": "BB + RSI confirmation", "version": "1.0.0"}
+        return {"name": "BB_RSI", "description": "BB + RSI confirmation", "version": "3.0.0"}
 
 
 class EMABBRSIStrategy(BaseStrategy):
-    """Triple confirmation: EMA + BB + RSI"""
+    """Triple confirmation: EMA + BB + RSI — powered by ta"""
 
-    def compute_signal(self, closes, highs, lows, volumes, params=None) -> dict:
+    def populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
         p = params or {}
-        arr = np.array(closes, dtype=float)
-        ema_sig, _, _ = _ema_cross(arr, p)
-        bb_sig = _bb_signal(arr, p)
-        rsi = _rsi_last(arr, int(p.get("rsiPeriod", 14)))
+        fast_p = int(p.get("fastPeriod", 20))
+        slow_p = int(p.get("slowPeriod", 50))
+        bb_p = int(p.get("bbPeriod", 20))
+        bb_std = float(p.get("bbStd", 2))
+        rsi_p = int(p.get("rsiPeriod", 14))
 
-        if ema_sig == "LONG" and (bb_sig == "LONG" or rsi < 40):
-            signal = "LONG"
-        elif ema_sig == "SHORT" and (bb_sig == "SHORT" or rsi > 60):
-            signal = "SHORT"
-        else:
-            signal = "NONE"
+        df["ema_fast"] = ta.trend.ema_indicator(df["close"], window=fast_p)
+        df["ema_slow"] = ta.trend.ema_indicator(df["close"], window=slow_p)
+        bb = ta.volatility.BollingerBands(df["close"], window=bb_p, window_dev=bb_std)
+        df["upper"] = bb.bollinger_hband()
+        df["lower"] = bb.bollinger_lband()
+        df["rsi"] = ta.momentum.rsi(df["close"], window=rsi_p)
+        return df
 
-        return {"signal": signal, "stoploss": None, "metadata": {"rsi": round(rsi, 2), "ema": ema_sig, "bb": bb_sig}}
+    def populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame:
+        prev_fast = df["ema_fast"].shift(1)
+        prev_slow = df["ema_slow"].shift(1)
+        ema_long = (prev_fast <= prev_slow) & (df["ema_fast"] > df["ema_slow"])
+        ema_short = (prev_fast >= prev_slow) & (df["ema_fast"] < df["ema_slow"])
+
+        bb_long = df["close"] < df["lower"]
+        bb_short = df["close"] > df["upper"]
+
+        df["signal"] = "NONE"
+        df.loc[ema_long & (bb_long | (df["rsi"] < 40)), "signal"] = "LONG"
+        df.loc[ema_short & (bb_short | (df["rsi"] > 60)), "signal"] = "SHORT"
+        return df
 
     def get_metadata(self) -> dict:
-        return {"name": "EMA_BB_RSI", "description": "Triple confirmation EMA+BB+RSI", "version": "1.0.0"}
+        return {"name": "EMA_BB_RSI", "description": "Triple confirmation EMA+BB+RSI", "version": "3.0.0"}

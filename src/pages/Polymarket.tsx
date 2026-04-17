@@ -1,8 +1,45 @@
 import { useState, useEffect, useRef } from 'react';
+import { AI_MODELS } from '../constants/aiModels';
 import { TrendingUp, Play, Square, Activity, Clock, CheckCircle, XCircle, RefreshCw, Zap, Brain } from 'lucide-react';
 
 // Point to the Python FastAPI service
 const POLY_API = 'http://localhost:8080';
+
+const SIGNAL_DESCS: Record<string, string> = {
+  momentum_1m: "แรงดีดราคาใน 1 นาที (บวก = พุ่งขึ้น / ลบ = พักตัว)",
+  momentum_5m: "แนวโน้มราคาช่วง 5 นาที (ช่วยกรอง Noise ของ 1m)",
+  momentum_15m: "แนวโน้มหลัก 15 นาที (ทิศทางหลักของตลาด)",
+  taker_ratio: "แรงซื้อ vs แรงขายฝั่งรุก (บวก = แรงซื้อสะสมมาก)",
+  ob_imbalance: "ความหนาแน่นใน Orderbook (บวก = แรงซื้อรอรับหนา)",
+  funding_rate: "ค่าธรรมเนียมถือสถานะ (บวก = คนเปิด Long เยอะเกินไป)",
+  volume_spike: "ปริมาณเทรดผิดปกติเทียบค่าเฉลี่ย (บวก = เริ่มมีเจ้าเข้า)",
+  mean_revert: "สัญญาณการกลับตัวเฉียบพลัน (Oversold=บวก / Overbought=ลบ)",
+  oi_delta: "เงินไหลเข้า/ออก (Open Interest) ในรอบ 5 นาที",
+  liquidation_vol: "การล้างพอร์ตฝั่งตรงข้าม (ยิ่งสูงแรงส่งราคาจะยิ่งแรง)"
+};
+
+const IND_DESCS: Record<string, string> = {
+  rsi: "RSI (14): ต่ำกว่า 30 = ขายมากไป, สูงกว่า 70 = ซื้อมากไป",
+  bb_position: "ตำแหน่งราคาเทียบกรอบ (0 = ขอบล่าง, 1 = ขอบบน)",
+  vwap: "ราคาเฉลี่ยถ่วงน้ำหนัก (แนวรับ/แนวต้านสำคัญระดับ Institution)",
+  atr: "ความผันผวน (ยิ่งสูงแปลว่าราคาสวิงแรงและอันตราย)",
+  macd: "โมเมนตัมสะสม (บวก = ขาขึ้นกำลังมีพลัง, ลบ = ขาลงครองตลาด)"
+};
+
+// Helper to convert the "1:30AM-1:35AM ET" string in the question to BKK time
+const localizeQuestion = (q: string, endIso: string) => {
+  if (!q || !endIso) return q;
+  try {
+    const end = new Date(endIso);
+    const start = new Date(end.getTime() - 5 * 60000);
+    const fmt = (d: Date) => d.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false });
+    const dateFmt = end.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: 'short' });
+    
+    // Look for the "Month Day, Time-Time ET" pattern and replace it
+    const bkkRange = `${dateFmt} ${fmt(start)} - ${fmt(end)}`;
+    return q.replace(/[A-Z][a-z]+ \d+, \d+:\d+[AP]M-\d+:\d+[AP]M ET/g, bkkRange);
+  } catch { return q; }
+};
 
 function StatCard({ label, value, sub, color = '#fff' }: any) {
   return (
@@ -28,12 +65,12 @@ function TradeRow({ trade }: { trade: any }) {
     }}>
       <div style={{ overflow: 'hidden' }}>
         <div style={{ fontSize: '0.82rem', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {trade.market_question ?? trade.question}
+          {localizeQuestion(trade.market_question ?? trade.question, trade.resolved_at ?? trade.timestamp ?? trade.end_date_iso)}
         </div>
         <div style={{ fontSize: '0.7rem', color: '#555', marginTop: '0.15rem' }}>
           {trade.side} · conf {((trade.ai_confidence ?? trade.confidence ?? 0) * 100).toFixed(0)}%
-          {trade.entered_at && ` · ${new Date(trade.entered_at).toLocaleTimeString()}`}
-          {trade.timestamp && ` · ${new Date(trade.timestamp).toLocaleTimeString()}`}
+          {trade.entered_at && ` · ${new Date(trade.entered_at).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
+          {trade.timestamp && ` · ${new Date(trade.timestamp).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`}
         </div>
       </div>
       <span style={{ fontSize: '0.75rem', padding: '2px 8px', borderRadius: '20px', whiteSpace: 'nowrap',
@@ -69,6 +106,8 @@ export default function Polymarket() {
   const [cfgSaved, setCfgSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [serviceOnline, setServiceOnline] = useState(false);
+  const [refreshTimer, setRefreshTimer] = useState(15);
+  const [expirySecs, setExpirySecs] = useState<number | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const fetchAll = async () => {
@@ -99,9 +138,33 @@ export default function Polymarket() {
       if (res.ok) {
         const data = await res.json();
         setPaper(data);
-        setPaperRunning(data.running);
+        setPaperRunning(!!data.running);
       }
     } catch {}
+  };
+
+  const isFetchingSignals = useRef(false);
+  const fetchSignals = async () => {
+    if (isFetchingSignals.current) return;
+    isFetchingSignals.current = true;
+    try {
+      const res = await fetch(`${POLY_API}/api/signals`);
+      if (res.ok) setSignals(await res.json());
+    } catch {} finally {
+      isFetchingSignals.current = false;
+    }
+  };
+
+  const isFetchingMarket = useRef(false);
+  const fetchMarket = async () => {
+    if (isFetchingMarket.current) return;
+    isFetchingMarket.current = true;
+    try {
+      const res = await fetch(`${POLY_API}/api/markets/btc5m`);
+      if (res.ok) setCurrentMarket(await res.json());
+    } catch {} finally {
+      isFetchingMarket.current = false;
+    }
   };
 
   useEffect(() => {
@@ -109,8 +172,30 @@ export default function Polymarket() {
     fetchPaper();
     const t1 = setInterval(fetchAll, 15000);
     const t2 = setInterval(fetchPaper, 5000);
-    return () => { clearInterval(t1); clearInterval(t2); };
+    const t3 = setInterval(() => {
+      setRefreshTimer(t => (t <= 1 ? 15 : t - 1));
+      setExpirySecs(s => (s && s > 0 ? s - 1 : s));
+    }, 1000);
+    return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); };
   }, []);
+
+  // Dedicated effect for high-frequency signals/market refresh
+  useEffect(() => {
+    const ms = cfg?.signal_refresh_ms || 3000;
+    const tick = async () => {
+      fetchSignals();
+      fetchMarket();
+    };
+    
+    const t = setInterval(tick, ms);
+    return () => clearInterval(t);
+  }, [cfg?.signal_refresh_ms]);
+
+  useEffect(() => {
+    if (currentMarket?.time_to_expiry_min) {
+      setExpirySecs(Math.floor(currentMarket.time_to_expiry_min * 60));
+    }
+  }, [currentMarket]);
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -181,6 +266,9 @@ export default function Polymarket() {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span style={{ fontSize: '0.75rem', color: '#666', border: '1px solid rgba(255,255,255,0.1)', padding: '2px 8px', borderRadius: '4px' }}>
+            Next Refresh: <strong style={{ color: '#fff', minWidth: '15px', display: 'inline-block' }}>{refreshTimer}s</strong>
+          </span>
           <span style={{ fontSize: '0.75rem', padding: '3px 10px', borderRadius: '20px', background: 'rgba(14,203,129,0.15)', color: '#0ecb81', border: '1px solid rgba(14,203,129,0.3)' }}>
             ● Service Online
           </span>
@@ -205,11 +293,18 @@ export default function Polymarket() {
             <Clock size={16} color="#faad14" />
             <span style={{ fontSize: '0.75rem', color: '#faad14', fontWeight: 600 }}>ACTIVE MARKET</span>
           </div>
-          <div style={{ flex: 1, fontSize: '0.9rem', fontWeight: 500 }}>{currentMarket.question}</div>
+          <div style={{ flex: 1, fontSize: '0.9rem', fontWeight: 500 }}>
+            {localizeQuestion(currentMarket.question, currentMarket.end_date_iso)}
+          </div>
           <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.82rem' }}>
             <span>UP <strong style={{ color: '#0ecb81' }}>{(currentMarket.yes_price * 100).toFixed(1)}¢</strong></span>
             <span>DOWN <strong style={{ color: '#f6465d' }}>{(currentMarket.no_price * 100).toFixed(1)}¢</strong></span>
-            <span style={{ color: '#555' }}>expires {currentMarket.time_to_expiry_min?.toFixed(1)}m</span>
+            <span style={{ color: expirySecs && expirySecs < 60 ? '#f6465d' : '#faad14', fontWeight: 600 }}>
+              {expirySecs ? `${Math.floor(expirySecs / 60)}:${(expirySecs % 60).toString().padStart(2, '0')}` : '—'}
+            </span>
+            <span style={{ color: '#555' }}>
+              (Ends: {new Date(currentMarket.end_date_iso).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })})
+            </span>
           </div>
         </div>
       )}
@@ -356,8 +451,11 @@ export default function Polymarket() {
               return (
                 <div key={key} style={{ marginBottom: '0.75rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '0.25rem' }}>
-                    <span style={{ color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{key.replace(/_/g, ' ')}</span>
-                    <span style={{ color: isPos ? '#0ecb81' : '#f6465d', fontWeight: 600 }}>{val >= 0 ? '+' : ''}{val?.toFixed(4)}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{ color: '#666', textTransform: 'uppercase', letterSpacing: '0.5px' }}>{key.replace(/_/g, ' ')}</span>
+                      <span style={{ fontSize: '0.65rem', color: '#444' }}>{SIGNAL_DESCS[key] || ''}</span>
+                    </div>
+                    <span style={{ color: isPos ? '#0ecb81' : '#f6465d', fontWeight: 600, alignSelf: 'center' }}>{val >= 0 ? '+' : ''}{val?.toFixed(4)}</span>
                   </div>
                   <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
                     <div style={{ height: '100%', width: `${pct}%`, background: isPos ? '#0ecb81' : '#f6465d', borderRadius: '2px', transition: 'width 0.3s' }} />
@@ -372,11 +470,14 @@ export default function Polymarket() {
               <Activity size={16} color="#a78bfa" /> Technical Indicators
             </div>
             {Object.entries(signals.indicators ?? {}).map(([key, val]: any) => (
-              <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)', fontSize: '0.82rem' }}>
-                <span style={{ color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', fontSize: '0.72rem' }}>{key.replace(/_/g, ' ')}</span>
-                <span style={{ fontWeight: 600, color: key === 'rsi' ? (val > 65 ? '#f6465d' : val < 35 ? '#0ecb81' : '#fff') : '#fff' }}>
-                  {typeof val === 'number' ? val.toFixed(key === 'rsi' || key === 'bb_position' ? 2 : 1) : val}
-                </span>
+              <div key={key} style={{ padding: '0.65rem 0', borderBottom: '1px solid rgba(255,255,255,0.04)', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem' }}>
+                  <span style={{ color: '#555', textTransform: 'uppercase', letterSpacing: '0.5px', fontSize: '0.72rem' }}>{key.replace(/_/g, ' ')}</span>
+                  <span style={{ fontWeight: 600, color: key === 'rsi' ? (val > 65 ? '#f6465d' : val < 35 ? '#0ecb81' : '#fff') : '#fff' }}>
+                    {typeof val === 'number' ? val.toFixed(key === 'rsi' || key === 'bb_position' ? 2 : 1) : val}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.68rem', color: '#444' }}>{IND_DESCS[key] || ''}</div>
               </div>
             ))}
           </div>
@@ -408,19 +509,15 @@ export default function Polymarket() {
             </CfgField>
 
             <CfgField label="AI Model">
-              <select className="styled-input" style={{ width: '100%' }}
-                value={cfg?.ai_model ?? ''}
-                onChange={e => setCfg((p: any) => ({ ...p, ai_model: e.target.value }))}
-              >
-                <option value="">Default (config.py)</option>
-                <option value="google/gemini-flash-1.5">⚡ Gemini Flash 1.5 (Fast)</option>
-                <option value="google/gemini-pro-1.5">♊ Gemini Pro 1.5</option>
-                <option value="google/gemini-3-flash-preview">🔮 Gemini 3 Flash Preview</option>
-                <option value="anthropic/claude-3.5-sonnet">🎭 Claude 3.5 Sonnet</option>
-                <option value="anthropic/claude-3-haiku">🪶 Claude 3 Haiku (Fast)</option>
-                <option value="deepseek/deepseek-chat">🤖 DeepSeek V3</option>
-                <option value="meta-llama/llama-3.1-405b">🦙 Llama 3.1 405B</option>
-              </select>
+                <select className="styled-input" style={{ width: '100%' }}
+                  value={cfg?.ai_model ?? ''}
+                  onChange={e => setCfg((p: any) => ({ ...p, ai_model: e.target.value }))}
+                >
+                  <option value="">Default (config.py)</option>
+                  {AI_MODELS.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
             </CfgField>
 
             <CfgField label="Use RAG Context (Learning from past trades)">
@@ -463,6 +560,19 @@ export default function Polymarket() {
                 value={cfg?.max_bet ?? 3.0}
                 onChange={e => setCfg((p: any) => ({ ...p, max_bet: parseFloat(e.target.value) }))}
               />
+            </CfgField>
+
+            <CfgField label={`Signal Refresh Rate — ${(cfg?.signal_refresh_ms ?? 3000) / 1000}s`}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <input type="range" min={500} max={10000} step={500} style={{ flex: 1 }}
+                  value={cfg?.signal_refresh_ms ?? 3000}
+                  onChange={e => setCfg((p: any) => ({ ...p, signal_refresh_ms: parseInt(e.target.value) }))}
+                />
+                <span style={{ minWidth: '40px', textAlign: 'right', fontWeight: 'bold', color: '#00d1ff' }}>
+                  {(cfg?.signal_refresh_ms ?? 3000) / 1000}s
+                </span>
+              </div>
+              <div style={{ fontSize: '0.7rem', color: '#444' }}>ความถี่ในการอัพเดตราคา BTC และปุ่ม UP/DOWN</div>
             </CfgField>
 
             {/* Read-only info */}

@@ -48,8 +48,9 @@ class BatchAnalyzeRequest(BaseModel):
 
 
 class BatchAnalyzeResponse(BaseModel):
-    signals: list[str]        # ["LONG", "NONE", "SHORT", ...]
-    confidences: list[float]  # [0.72, 0.0, 0.65, ...]
+    signals: list[str]              # ["LONG", "NONE", "SHORT", ...]
+    confidences: list[float]        # [0.72, 0.0, 0.65, ...]
+    metadatas: list[dict] = []      # [{"rsi": 32.1}, {}, ...]
 
 
 class StrategyEntry(BaseModel):
