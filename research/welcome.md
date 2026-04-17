@@ -1,11 +1,18 @@
-# Welcome to the Secondary Brain 🧠
+---
+tags: [onboarding, overview]
+---
+# Welcome to CryptoSmartTrade
 
-นี่คือพื้นที่สำหรับรวบรวมความรู้ กลยุทธ์ และบันทึกการเรียนรู้เกี่ยวกับการลงทุนครับ
+Your advanced, AI-powered crypto trading engine.
 
-## หัวข้อที่ควรบันทึก
-- **Technical Analysis**: จดรูปแบบกราฟที่น่าสนใจ
-- **Indicators**: บันทึกว่า Indicator ไหนใช้ดีในสถานการณ์ใด
-- **Strategy Ideas**: ไอเดียใหม่ๆ ที่อยากพัฒนา
-- **Learning Journal**: บทเรียนที่ได้จากการเทรดจริง
+## 🚀 Getting Started
 
-ข้อมูลที่จดไว้ตรงนี้ จะถูกใช้เป็นฐานความรู้ (Knowledge Base) ให้กับ AI (Antigravity) เพื่อช่วยวิเคราะห์โค้ดและกลยุทธ์ของคุณได้แม่นยำขึ้นครับ
+1. **Architecture**: Review the `research/system_architecture.md` to understand how the monorepo is structured.
+2. **Setup**: Follow the instructions in the root `README.md` to install dependencies and start the development servers.
+3. **Research**: Use the `/research` page in the web app to explore the knowledge base.
+
+## 🧠 The Secondary Brain
+This project uses a "Secondary Brain" approach where all technical decisions and system states are documented in the `research/` directory.
+
+---
+Happy Trading!

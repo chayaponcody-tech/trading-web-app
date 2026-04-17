@@ -1,7 +1,7 @@
 import { computeSignal, generateEntryReason, generateDiagnostic } from './SignalEngine.js';
 import { getPythonSignal } from './PythonStrategyClient.js';
 import { applySlippage, computePositionSize, computeTPSL } from './Backtester.js';
-import { computeATR } from '../../shared/indicators.js';
+import { emaCalc, computeATR } from '../../shared/indicators.js';
 import { reflect } from '../../ai-agents/src/ReflectionAgent.js';
 import { reviewBot } from '../../ai-agents/src/ReviewerAgent.js';
 import { assessTrailingAdjustment } from '../../ai-agents/src/TrailingAIAgent.js';
@@ -10,6 +10,7 @@ import { appendTrade } from '../../data-layer/src/repositories/tradeRepository.j
 import { saveMistake, getRecentMistakes } from '../../data-layer/src/index.js';
 import { TZ_OPTS } from '../../shared/config.js';
 import { TuningService } from './TuningService.js';
+import { CircuitBreaker } from './CircuitBreaker.js';
 
 // ─── Bot Manager ──────────────────────────────────────────────────────────────
 // Manages bot lifecycle and orchestrates the tick loop.
@@ -34,6 +35,7 @@ export class BotManager {
     this.tuningService = new TuningService(exchange, config);
     this.tickCount = 0;
     this.notificationService = null;
+    this.circuitBreaker = new CircuitBreaker('Binance-API', { threshold: 10, resetTimeout: 60000 });
   }
 
   // ─── Dependency Injection ────────────────────────────────────────────────────
@@ -245,8 +247,8 @@ export class BotManager {
     const bot = this.bots.get(botId);
     if (!bot || !bot.isRunning) return;
     const exchange = this._getExchange(bot);
-    if (!exchange) {
-      bot.currentThought = '⚠️ Exchange not configured — set API keys in Configuration';
+    if (!this.circuitBreaker.shouldAllowRequest()) {
+      bot.currentThought = '⌛ [Circuit Breaker] ระบบหยุดพักชั่วคราวเนื่องจาก API มีปัญหาบ่อย (กำลังรอการ Reset)';
       bot.lastThoughtAt = new Date().toISOString();
       return;
     }
@@ -266,7 +268,11 @@ export class BotManager {
         this._getExchange(bot).getAccountInfo(),
       ]);
 
-      if (!Array.isArray(klines)) return;
+      if (!Array.isArray(klines)) {
+        this.circuitBreaker.recordFailure();
+        return;
+      }
+      this.circuitBreaker.recordSuccess();
 
       bot._lastKlines = klines;
 
@@ -498,6 +504,8 @@ export class BotManager {
       this._save();
     } catch (err) {
       console.error(`[Bot ${botId}] ${this._mode(bot)} Tick error:`, err.message);
+      this.circuitBreaker.recordFailure();
+
       bot.currentThought = `❌ Error: ${err.message.slice(0, 80)}`;
       bot.lastThoughtAt = new Date().toISOString();
       if (err.message.includes('-2015') || err.message.includes('-2008') || err.message.includes('API-key')) {

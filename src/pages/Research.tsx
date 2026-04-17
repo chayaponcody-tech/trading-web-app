@@ -227,18 +227,36 @@ export default function ResearchBrain() {
                   <h4 style={{ margin: 0 }}>{activeFile.replace('.md', '')}</h4>
                 </div>
                 {/* Active Tags Display/Editor */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap', marginTop: '0.4rem' }}>
                   {tags.map(tag => (
                     <span 
                       key={tag} 
-                      style={{ fontSize: '0.7rem', background: 'rgba(0,122,255,0.1)', color: 'var(--accent-primary)', padding: '1px 8px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                      style={{ 
+                        fontSize: '0.7rem', 
+                        background: 'linear-gradient(135deg, rgba(0,122,255,0.1) 0%, rgba(0,122,255,0.05) 100%)', 
+                        color: 'var(--accent-primary)', 
+                        padding: '2px 10px', 
+                        borderRadius: '12px', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        gap: '0.4rem',
+                        border: '1px solid rgba(0,122,255,0.2)',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                      }}
                     >
-                      #{tag}
-                      {isEditing && <span style={{ cursor: 'pointer', fontWeight: 'bold' }} onClick={() => removeTag(tag)}>×</span>}
+                      <span style={{ opacity: 0.6 }}>#</span>{tag}
+                      {isEditing && (
+                        <span 
+                          style={{ cursor: 'pointer', fontWeight: 'bold', marginLeft: '2px', fontSize: '0.8rem', opacity: 0.8 }} 
+                          onClick={() => removeTag(tag)}
+                        >
+                          ×
+                        </span>
+                      )}
                     </span>
                   ))}
                   {isEditing && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', marginLeft: '0.5rem' }}>
                       <input 
                         type="text" 
                         placeholder="Add tag..." 
@@ -247,7 +265,7 @@ export default function ResearchBrain() {
                         onKeyDown={(e) => e.key === 'Enter' && addTag()}
                         style={{ background: 'transparent', border: 'none', borderBottom: '1px solid #444', color: '#fff', fontSize: '0.7rem', outline: 'none', width: '80px' }}
                       />
-                      <Plus size={12} style={{ cursor: 'pointer' }} onClick={addTag} />
+                      <Plus size={12} style={{ cursor: 'pointer', color: 'var(--accent-primary)' }} onClick={addTag} />
                     </div>
                   )}
                 </div>

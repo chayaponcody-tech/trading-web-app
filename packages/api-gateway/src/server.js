@@ -10,7 +10,7 @@ import { BinanceAdapter } from '../../exchange-connector/src/BinanceAdapter.js';
 import { BotManager } from '../../bot-engine/src/BotManager.js';
 import { PortfolioManager } from '../../bot-engine/src/PortfolioManager.js';
 import { 
-  loadBinanceConfig, getAllBots, getAllFleets, getSetting, upsertFleet 
+  loadBinanceConfig, getAllBots, getAllFleets, getSetting, saveSetting, upsertFleet 
 } from '../../data-layer/src/index.js';
 import { PORT } from '../../shared/config.js';
 
@@ -158,37 +158,25 @@ app.post('/api/execute-python', async (req, res, next) => {
   }
 });
 
-// ─── Compatibility Endpoints (Legacy State) ───────────────────────────────────
-const dataFile = path.resolve('paper-trading-db.json');
-const defaultState = {
-  isBotRunning: false,
-  selectedStrategy: 'EMA',
-  tpPercent: 2.0,
-  slPercent: 1.0,
-  paperState: { balance: 10000, position: 'NONE', entryPrice: 0, trades: 0, equity: 10000 },
-  tradeHistory: []
-};
-if (!fs.existsSync(dataFile)) {
-  fs.writeFileSync(dataFile, JSON.stringify(defaultState, null, 2));
-}
+// ─── Compatibility Endpoints (Legacy State via Data Layer) ────────────────────
 
 app.get('/api/state', (req, res) => {
   try {
-    const data = fs.readFileSync(dataFile, 'utf8');
-    res.json(JSON.parse(data));
+    const state = getSetting('paperState', {});
+    res.json(state);
   } catch (e) {
-    res.status(500).json({ error: 'Failed to read data' });
+    res.status(500).json({ error: 'Failed to read state from database' });
   }
 });
 
 app.post('/api/state', (req, res) => {
   try {
-    const currentState = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    const currentState = getSetting('paperState', {});
     const newState = { ...currentState, ...req.body };
-    fs.writeFileSync(dataFile, JSON.stringify(newState, null, 2));
+    saveSetting('paperState', newState);
     res.json({ success: true, state: newState });
   } catch (e) {
-    res.status(500).json({ error: 'Failed to write data' });
+    res.status(500).json({ error: 'Failed to save state to database' });
   }
 });
 
