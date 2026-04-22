@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 import fs from 'fs';
 import path from 'path';
 
@@ -115,6 +116,21 @@ if (exchange) {
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 console.log('🛤️ [Server] Mounting Routes...');
+
+// 🔄 Proxy to Python Quant Engine (8002)
+app.use('/api/quant', createProxyMiddleware({
+  target: 'http://localhost:8002',
+  changeOrigin: true,
+  pathRewrite: { '^/api/quant': '' }, // Remove /api/quant prefix when forwarding
+}));
+
+// 🔄 Proxy to Polymarket Agent (8080)
+app.use('/api/polymarket', createProxyMiddleware({
+  target: 'http://localhost:8080',
+  changeOrigin: true,
+  pathRewrite: { '^/api/polymarket': '' },
+}));
+
 app.use('/api/bots',      createBotRoutes(botManager));
 app.use('/api/ai',        createAiRoutes(botManager, binanceConfig));
 app.use('/api/binance',   createBinanceRoutes(botManager, Array.from(portfolioManagers.values())[0], binanceConfig)); 

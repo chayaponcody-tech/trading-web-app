@@ -42,8 +42,8 @@ export default function MarketAnalysis() {
     draw: false
   });
 
-  const API_BASE = 'http://localhost:4000/api';
-  const API_FEATURES = 'http://localhost:4001/api/market';
+  const API_BASE = '/api';
+  const API_FEATURES = '/api/market';
 
   useEffect(() => {
     const fetchStrategies = async () => {

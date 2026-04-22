@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { AI_MODELS } from '../constants/aiModels';
 
-const QUANT_URL = 'http://localhost:8002';
+const QUANT_URL = '/api/quant';
 
 interface AgentStatus {
   name: string;

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Brain, RefreshCw, Power, PowerOff, TrendingUp, TrendingDown, Bell, Newspaper, Users, Zap, Search, LayoutGrid } from 'lucide-react';
 
-const QUANT_URL = 'http://localhost:8002';
+const QUANT_URL = '/api/quant';
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'];
 
 interface NewsItem {
