@@ -77,11 +77,19 @@ export default function BotSidebar({ binanceKeys, onStart, onAIRecommend, loadin
           strategyType: HUNT_TYPE[selectedStrategy.strategy] || 'scalp',
         }),
       });
+      
+      if (!res.ok) {
+        if (res.status === 502) throw new Error('AI Analysis took too long (Timeout). Please try again.');
+        const errText = await res.text();
+        throw new Error(`Server Error (${res.status}): ${errText.slice(0, 100)}`);
+      }
+
       const data = await res.json();
       setScanResults(data || []);
       if (data?.length > 0) setSymbol(data[0].symbol);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Scan error:', e);
+      alert(e.message || 'Failed to scan market with AI');
     } finally {
       setScanning(false);
     }

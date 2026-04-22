@@ -22,14 +22,10 @@ const STRATEGIES = [
 
 const INTERVALS = ['5m', '15m', '1h', '4h', '1d'];
 
-interface OpenPosition {
-  id: string;
-  type: string;
-  entryPrice: number;
-  entryTime: string;
-  entryReason?: string; // Add reason field
-  liqId?: number;
-  initialMargin?: number;
+  entryReason?: string;
+  quantity: number;
+  dynamicTp?: number;
+  dynamicSl?: number;
 }
 
 interface Trade {
@@ -1259,7 +1255,7 @@ export default function BinanceTestnet() {
                       <div>Entry: <span style={{ color: '#eee' }}>${parseFloat(t.entryPrice).toFixed(4)}</span></div>
                       <div>Exit: <span style={{ color: '#eee' }}>${parseFloat(t.exitPrice).toFixed(4)}</span></div>
                       <div>Reason: <span style={{ color: '#faad14' }}>{t.reason || 'Closed'}</span></div>
-                      <div style={{ textAlign: 'right' }}>Time: <span style={{ color: '#888' }}>{new Date(t.exitTime).toLocaleString('th-TH')}</span></div>
+                      <div style={{ textAlign: 'right' }}>Time: <span style={{ color: '#888' }}>{new Date(t.exitTime).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}</span></div>
                     </div>
                   </div>
                 );
@@ -1657,13 +1653,10 @@ export default function BinanceTestnet() {
                              <td style={{ padding: '1rem' }}>
                                 {(() => {
                                   let entryReason = 'Technical / API Entry';
-                                  let lastUpdated = null;
                                   if (linkedBot) {
                                       if (botPos?.entryReason) entryReason = botPos.entryReason;
                                       else if (linkedBot.aiReason) entryReason = linkedBot.aiReason;
                                       else if (linkedBot.config.strategy) entryReason = `Strategy: ${linkedBot.config.strategy}`;
-                                      
-                                      if (linkedBot.lastAiCheck) lastUpdated = linkedBot.lastAiCheck;
                                   }
                                   return (
                                     <>
@@ -1680,14 +1673,27 @@ export default function BinanceTestnet() {
                             <td style={{ padding: '1rem' }}>
                                {(() => {
                                  if (!linkedBot) return <span style={{ color: '#555' }}>N/A</span>;
+                                 
                                  const tpVal = parseFloat(p.entryPrice) * (1 + (side === 'LONG' ? linkedBot.config.tpPercent / 100 : -linkedBot.config.tpPercent / 100));
                                  const slVal = parseFloat(p.entryPrice) * (1 + (side === 'LONG' ? -linkedBot.config.slPercent / 100 : linkedBot.config.slPercent / 100));
-                                 return (
+                                 
+                                 const finalTp = botPos?.dynamicTp || tpVal;
+                                 const finalSl = botPos?.dynamicSl || slVal;
+                                 const isAiAdjusted = !!(botPos?.dynamicTp || botPos?.dynamicSl);
+
                                    <>
-                                     <div style={{ fontSize: '0.8rem', color: '#0ecb81', fontWeight: 'bold' }}>TP: {formatPrice(tpVal)}</div>
-                                     <div style={{ fontSize: '0.8rem', color: '#f6465d', fontWeight: 'bold' }}>SL: {formatPrice(slVal)}</div>
+                                     <div style={{ fontSize: '0.8rem', color: isAiAdjusted ? '#faad14' : '#0ecb81', fontWeight: 'bold' }}>
+                                       {isAiAdjusted ? '✨ AI TP: ' : 'TP: '}{formatPrice(finalTp)}
+                                     </div>
+                                     <div style={{ fontSize: '0.8rem', color: isAiAdjusted ? '#faad14' : '#f6465d', fontWeight: 'bold' }}>
+                                       {isAiAdjusted ? '✨ AI SL: ' : 'SL: '}{formatPrice(finalSl)}
+                                     </div>
+                                     {linkedBot?.lastAiCheck && (
+                                       <div style={{ fontSize: '0.6rem', color: '#666', marginTop: '4px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '2px' }}>
+                                         ⏱️ AI Update: {new Date(linkedBot.lastAiCheck).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' })}
+                                       </div>
+                                     )}
                                    </>
-                                 );
                                })()}
                             </td>
                             <td style={{ padding: '1rem', color: roe >= 0 ? '#0ecb81' : '#f6465d' }}>
@@ -2286,8 +2292,12 @@ function BotCard({ bot, onStop, onDelete, onResume, expanded, onToggle, isGrid =
               {bot.openPositions.length > 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                   <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.65rem', fontWeight: 'bold', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: '#0ecb81' }}>🎯 TP { (bot.openPositions[0].type === 'LONG' ? bot.openPositions[0].entryPrice * (1 + bot.config.tpPercent / 100) : bot.openPositions[0].entryPrice * (1 - bot.config.tpPercent / 100)).toFixed(bot.currentPrice < 0.01 ? 6 : bot.currentPrice < 10 ? 4 : 2) }</span>
-                    <span style={{ color: '#f6465d' }}>🛑 SL { (bot.openPositions[0].type === 'LONG' ? bot.openPositions[0].entryPrice * (1 - bot.config.slPercent / 100) : bot.openPositions[0].entryPrice * (1 + bot.config.slPercent / 100)).toFixed(bot.currentPrice < 0.01 ? 6 : bot.currentPrice < 10 ? 4 : 2) }</span>
+                    <span style={{ color: bot.openPositions[0].dynamicTp ? '#faad14' : '#0ecb81' }}>
+                      {bot.openPositions[0].dynamicTp ? '✨' : ''} TP { (bot.openPositions[0].dynamicTp || (bot.openPositions[0].type === 'LONG' ? bot.openPositions[0].entryPrice * (1 + bot.config.tpPercent / 100) : bot.openPositions[0].entryPrice * (1 - bot.config.tpPercent / 100))).toFixed(bot.currentPrice < 0.01 ? 6 : bot.currentPrice < 10 ? 4 : 2) }
+                    </span>
+                    <span style={{ color: bot.openPositions[0].dynamicSl ? '#faad14' : '#f6465d' }}>
+                      {bot.openPositions[0].dynamicSl ? '✨' : ''} SL { (bot.openPositions[0].dynamicSl || (bot.openPositions[0].type === 'LONG' ? bot.openPositions[0].entryPrice * (1 - bot.config.slPercent / 100) : bot.openPositions[0].entryPrice * (1 + bot.config.slPercent / 100))).toFixed(bot.currentPrice < 0.01 ? 6 : bot.currentPrice < 10 ? 4 : 2) }
+                    </span>
                   </div>
                   {bot.openPositions[0].entryReason && (
                     <div style={{ fontSize: '0.62rem', color: '#faad14', fontStyle: 'italic', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={bot.openPositions[0].entryReason}>

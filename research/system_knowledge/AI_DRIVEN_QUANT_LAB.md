@@ -1,5 +1,9 @@
 ---
-tags: [ai, roadmap, quant-engine, automation]
+tags:
+  - ai
+  - roadmap
+  - quant-engine
+  - automation
 ---
 # AI-Driven Quant Lab: Roadmap & Capability Map
 
@@ -12,8 +16,8 @@ tags: [ai, roadmap, quant-engine, automation]
 
 | Component | Description | Status |
 |---|---|---|
-| **ScoutAgent** | ค้นหาไอเดีย Alpha จาก Web, Twitter, GitHub และ Papers | 🔴 Not Started |
-| **AlphaAgent** | แปลงไอเดียเป็นโค้ด Python (VectorBT) ผ่าน LLM | 🟡 Partial (Concept logic ready) |
+| **ScoutAgent** | ค้นหาไอเดีย Alpha จาก Web, Twitter, GitHub และ Papers | 🟡 Partial (Prototype ready) |
+| **AlphaAgent** | แปลงไอเดียเป็นโค้ด Python (VectorBT) ผ่าน LLM | 🟢 Completed (Refined Prompt) |
 | **ValidationAgent**| รัน Backtest, WFA และคำนวณ Metrics เพื่อคัดกรอง | 🟡 Partial (VectorBT integrated) |
 | **Review Dashboard**| UI สำหรับ Admin ตรวจสอบและอนุมัติกลยุทธ์ใหม่ | 🔴 Not Started |
 | **Automated Deploy**| ระบบติดตั้งกลยุทธ์อัตโนมัติหลังได้รับการอนุมัติ | 🔴 Not Started |

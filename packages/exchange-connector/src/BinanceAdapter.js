@@ -34,32 +34,27 @@ export class BinanceAdapter extends BaseExchange {
     this.publicClient = new ccxt.binanceusdm({ ...exchangeOptions, apiKey: undefined, secret: undefined });
 
     if (useTestnet) {
-      const demoDomain = 'demo-fapi.binance.com';
-      
       const overrideUrls = (ex) => {
-        // PROVEN TOTAL LOCKDOWN: Private/Trade endpoints stay on Demo
-        ex.urls['api']['private'] = `https://${demoDomain}/fapi/v1`;
-        ex.urls['api']['fapiPrivate'] = `https://${demoDomain}/fapi/v1`;
-        ex.urls['api']['fapiPrivateV2'] = `https://${demoDomain}/fapi/v2`;
-        ex.urls['api']['sapi'] = `https://${demoDomain}/sapi/v1`; 
-        
-        // STABILITY UPGRADE: Direct public data to PRODUCTION
-        // Public microstructure data (Funding, OI) is the same for everyone
-        // and production is 1000x more stable than demo servers.
+        const demoDomain = 'demo-fapi.binance.com';
         const prodFapi = 'https://fapi.binance.com/fapi/v1';
-        const prodFapiV2 = 'https://fapi.binance.com/fapi/v2';
-        
+
+        // 1. Override API map directly (Do NOT set sandbox = true to avoid CCXT deprecation error)
         ex.urls['api']['public'] = prodFapi;
         ex.urls['api']['fapiPublic'] = prodFapi;
-        ex.urls['api']['fapiPublicV2'] = prodFapiV2;
+        ex.urls['api']['fapi'] = prodFapi; // Force public requests to production
+        ex.urls['api']['fapiPrivate'] = `https://${demoDomain}/fapi/v1`;
+        ex.urls['api']['private'] = `https://${demoDomain}/fapi/v1`;
+        ex.urls['api']['fapiPrivateV2'] = `https://${demoDomain}/fapi/v2`;
         ex.urls['api']['futuresData'] = 'https://fapi.binance.com';
-      };
 
+        // 2. Ensure CCXT knows we are using democratic endpoints but avoid the 'sandbox' flag
+        ex.options['defaultType'] = 'future';
+        ex.options['adjustForTimeDifference'] = true;
+      };
 
       overrideUrls(this.client);
       overrideUrls(this.publicClient);
-      
-      console.log('[BinanceAdapter] TOTAL LOCKDOWN: All endpoints routed to Demo Server.');
+      console.log('[BinanceAdapter] Testnet: Sandbox Mode Active with Production Public Overrides.');
     } else {
       console.log('[BinanceAdapter] Initialized in LIVE (Production) mode.');
     }
@@ -286,6 +281,52 @@ export class BinanceAdapter extends BaseExchange {
       return rules;
     } catch (e) {
       throw new Error(`[BinanceAdapter] getSymbolRules error: ${e.message}`);
+    }
+  }
+
+  /**
+   * Fetch recent liquidation orders (Liquidation Feed).
+   */
+  async getLiquidationOrders(symbol, limit = 100) {
+    try {
+      const formattedSymbol = symbol.toUpperCase().replace('/', '').replace(':USDT', '');
+      // Use fapiPublicGetAllForceOrders or fapiPublicGetForceOrders if available, 
+      // but the most stable is often the explicitly mapped one.
+      // 400 Error "out of maintenance" usually means parameter mismatch.
+      return await this._getPublic().fapiPublicGetAllForceOrders({
+        symbol: formattedSymbol,
+        limit: limit
+      });
+    } catch (e) {
+      console.warn(`[BinanceAdapter] getLiquidationOrders failed for ${symbol}: ${e.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch Aggregate Trades (AggTrades) to calculate Order Flow Delta.
+   */
+  async getAggregateTrades(symbol, limit = 500) {
+    try {
+      const formattedSymbol = symbol.toUpperCase().replace('/', '').replace(':USDT', '');
+      return await this._getPublic().fapiPublicGetAggTrades({
+        symbol: formattedSymbol,
+        limit: limit
+      });
+    } catch (e) {
+      console.warn(`[BinanceAdapter] getAggregateTrades failed for ${symbol}: ${e.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch real trade history from Binance for a symbol (or all if omitted).
+   */
+  async getMyTrades(symbol = undefined, since = undefined, limit = 50) {
+    try {
+      return await this.client.fetchMyTrades(symbol, since, limit);
+    } catch (e) {
+      throw new Error(`[BinanceAdapter] getMyTrades error: ${e.message}`);
     }
   }
 }

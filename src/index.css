@@ -162,3 +162,7 @@ p {
 @media (min-width: 769px) {
   .sidebar-fab { display: none !important; }
 }
+
+.spin {
+  animation: spin 1s linear infinite;
+}

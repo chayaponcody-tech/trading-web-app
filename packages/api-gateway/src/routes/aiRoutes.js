@@ -73,13 +73,19 @@ export function createAiRoutes(botManager, binanceConfig) {
       const cfg = getCfg();
       if (!requireKey(res, cfg)) return;
       const { prompt, model } = req.body;
-      const content = await callOpenRouter(prompt, cfg.openRouterKey, model || cfg.openRouterModel, { jsonMode: false });
+      const content = await callOpenRouter(prompt, cfg.openRouterKey, model || cfg.openRouterModel, { feature: 'genericChat', jsonMode: false });
       res.json({ content });
     } catch (e) { next(e); }
   });
 
   // Trade memory
-  r.get('/memory', (req, res) => res.json(getTradeMemory()));
+  r.get('/memory', (req, res) => {
+    const rows = getTradeMemory();
+    res.json(rows.map(r => ({
+      ...r,
+      exitTime: r.exitTime && !r.exitTime.endsWith('Z') ? r.exitTime.replace(' ', 'T') + 'Z' : r.exitTime
+    })));
+  });
 
   // Single-bot parameter optimization
   r.post('/optimize', async (req, res, next) => {

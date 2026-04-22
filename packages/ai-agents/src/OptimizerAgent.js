@@ -31,7 +31,7 @@ TASK:
 
 Write a professional Markdown report. ENTIRE response must be in THAI.`;
 
-  return callOpenRouter(prompt, apiKey, model, { jsonMode: false, maxTokens: 2000 });
+  return callOpenRouter(prompt, apiKey, model, { feature: 'analyzeMistakes', jsonMode: false, maxTokens: 2000 });
 }
 
 /**
@@ -65,7 +65,7 @@ TASK:
 Professional Markdown format with clear sections.
 IMPORTANT: Entire response MUST be in THAI.`;
 
-  return callOpenRouter(prompt, apiKey, model, { jsonMode: false, maxTokens: 2000 });
+  return callOpenRouter(prompt, apiKey, model, { feature: 'analyzeFleet', jsonMode: false, maxTokens: 2000 });
 }
 
 /**
@@ -105,7 +105,7 @@ RESPONSE MUST BE JSON ONLY:
 }`;
 
 
-  const res = await callOpenRouter(prompt, apiKey, model, { jsonMode: true });
+  const res = await callOpenRouter(prompt, apiKey, model, { feature: 'parameterOptimization', jsonMode: true });
   if (typeof res === 'object' && res !== null) {
       return res;
   }
@@ -172,7 +172,7 @@ RESPONSE MUST BE JSON ONLY:
 ${responseFormat}`;
 
   try {
-    const res = await callOpenRouter(prompt, apiKey, model, { jsonMode: true });
+    const res = await callOpenRouter(prompt, apiKey, model, { feature: 'indicatorTuning', jsonMode: true });
     if (typeof res === 'object' && res !== null) return res;
     return JSON.parse(res);
   } catch (e) {
@@ -180,3 +180,47 @@ ${responseFormat}`;
     return null;
   }
 }
+
+/**
+ * Higher-level "Chief Investment Officer" Agent.
+ * Reviews all fleets and total equity distribution.
+ * @param {Array} fleets
+ * @param {Array} allBots
+ * @param {string} apiKey
+ * @param {string} model
+ */
+export async function analyzeGlobalPortfolio(fleets, allBots, apiKey, model) {
+  const fleetSummaries = fleets.map(f => {
+    const fBots = allBots.filter(b => b.managedBy === f.id);
+    const totalPnl = fBots.reduce((s, b) => s + (b.netPnl || 0), 0);
+    return {
+      name: f.name,
+      activeBots: fBots.length,
+      mode: f.config?.riskMode || 'manual',
+      budget: f.config?.totalBudget || 0,
+      totalPnl: totalPnl.toFixed(2),
+      isAutonomous: f.isRunning ? 'YES' : 'NO'
+    };
+  });
+
+  const prompt = `You are the CHIEF INVESTMENT OFFICER (CIO) of an AI Quant Fund.
+Review my current Global Portfolio across all trading fleets.
+
+[Fleet Summaries]
+${JSON.stringify(fleetSummaries, null, 2)}
+
+[Market Context]
+Current exposure is across ${allBots.length} active bots on Binance.
+
+TASK:
+1. Executive Summary: Overall portfolio health and performance.
+2. Risk Analysis: Are we over-exposed? Is any fleet underperforming?
+3. Strategic Guidance: Should we change risk modes (e.g. shift from Grid to Trend)?
+4. Scaling Recommendation: Should we increase or decrease capital in specific fleets?
+
+Format: Professional Markdown. Use emoji for impact.
+IMPORTANT: Entire response MUST be in THAI (ภาษาไทย).`;
+
+  return callOpenRouter(prompt, apiKey, model, { feature: 'globalPortfolioAnalysis', jsonMode: false, maxTokens: 1500 });
+}
+

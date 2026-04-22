@@ -108,11 +108,22 @@ export function createStrategyRoutes(exchange) {
         filter.engineType = req.query.engineType;
       }
       if (req.query.tags) {
-        // Accept comma-separated tags: ?tags=trend,momentum
         filter.tags = req.query.tags.split(',').map(t => t.trim()).filter(Boolean);
       }
-      const strategies = getAllStrategies(filter);
-      res.json(strategies);
+      
+      const dbStrategies = getAllStrategies(filter);
+      
+      // Map built-in keys to a similar format
+      const builtinStrategies = BUILTIN_STRATEGY_KEYS.map(key => ({
+        id: `builtin:${key}`,
+        name: key,
+        description: `Built-in standard ${key} strategy`,
+        engineType: 'python',
+        tags: ['built-in']
+      }));
+
+      // Combine and return
+      res.json([...builtinStrategies, ...dbStrategies]);
     } catch (e) {
       res.status(500).json({ error: e.message });
     }

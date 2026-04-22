@@ -10,6 +10,8 @@ export interface ChartProps {
   strategy: string;
   gridUpper?: number;
   gridLower?: number;
+  tp?: number;
+  sl?: number;
   onClose: () => void;
 }
 

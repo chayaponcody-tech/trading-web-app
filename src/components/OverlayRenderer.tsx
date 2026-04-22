@@ -136,7 +136,12 @@ export default function OverlayRenderer({
           }
           const t2 = t2_val as Time;
           
-          const color = z.type === 'HOB' ? '#00d1ff' : (z.type === 'BB' ? '#f6465d' : '#9c27b0');
+          let color = '#9c27b088'; // default purple with alpha
+          if (z.type === 'FVG_UP') color = '#818cf888';
+          else if (z.type === 'FVG_DOWN') color = '#fb923c88';
+          else if (z.type === 'OB_UP') color = '#06b6d488';
+          else if (z.type === 'OB_DOWN') color = '#f43f5e88';
+
           const visibility = toggleStates.zones || false;
 
           const addZoneLine = (val: number, style: LineStyle = LineStyle.Solid) => {
@@ -152,7 +157,6 @@ export default function OverlayRenderer({
               s.setData([{ time: t1, value: val }, { time: t2, value: val }]);
               zoneSeriesRef.current.push(s);
             } catch (err) {
-              // Silently catch sorting errors to prevent full app crash
               console.warn("Zone rendering skip:", err);
             }
           };
@@ -197,8 +201,9 @@ export default function OverlayRenderer({
     removeTradeLevels(candleSeries);
     if (!selectedTrade || !toggleStates.levels) return;
 
-    const { entryPrice, tpPrice, tp2Price, tp3Price, slPrice, type } = selectedTrade;
+    const { entryPrice, tp1Price, tpPrice, tp2Price, tp3Price, slPrice, type } = selectedTrade as any;
     const isLong = type === 'LONG';
+    const effectiveTP1 = tp1Price || tpPrice;
 
     entryLineRef.current = candleSeries.createPriceLine({
       price: entryPrice,
@@ -206,21 +211,21 @@ export default function OverlayRenderer({
       lineWidth: 1,
       lineStyle: LineStyle.Solid,
       axisLabelVisible: true,
-      title: `ENTRY ${entryPrice.toFixed(2)}`,
+      title: 'ENTRY',
     });
 
-    if (tpPrice > 0) {
+    if (effectiveTP1 > 0) {
       tp1LineRef.current = candleSeries.createPriceLine({
-        price: tpPrice,
+        price: effectiveTP1,
         color: '#0ecb81',
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
-        title: `TP1 ${tpPrice.toFixed(2)}`,
+        title: 'TP1',
       });
     }
 
-    const tp2 = tp2Price ?? (tpPrice > 0 ? entryPrice + (tpPrice - entryPrice) * 2 * (isLong ? 1 : -1) : 0);
+    const tp2 = tp2Price ?? (effectiveTP1 > 0 ? entryPrice + (effectiveTP1 - entryPrice) * 2 * (isLong ? 1 : -1) : 0);
     if (tp2 > 0) {
       tp2LineRef.current = candleSeries.createPriceLine({
         price: tp2,
@@ -228,11 +233,11 @@ export default function OverlayRenderer({
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
-        title: `TP2 ${tp2.toFixed(2)}`,
+        title: 'TP2',
       });
     }
 
-    const tp3 = tp3Price ?? (tpPrice > 0 ? entryPrice + (tpPrice - entryPrice) * 3 * (isLong ? 1 : -1) : 0);
+    const tp3 = tp3Price ?? (effectiveTP1 > 0 ? entryPrice + (effectiveTP1 - entryPrice) * 3 * (isLong ? 1 : -1) : 0);
     if (tp3 > 0) {
       tp3LineRef.current = candleSeries.createPriceLine({
         price: tp3,
@@ -240,7 +245,7 @@ export default function OverlayRenderer({
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
-        title: `TP3 ${tp3.toFixed(2)}`,
+        title: 'TP3',
       });
     }
 
@@ -251,7 +256,7 @@ export default function OverlayRenderer({
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,
-        title: `SL ${slPrice.toFixed(2)}`,
+        title: 'SL',
       });
     }
 

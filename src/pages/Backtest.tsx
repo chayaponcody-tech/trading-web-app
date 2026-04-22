@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
+import { Play } from 'lucide-react';
 import SymbolSelector from '../components/SymbolSelector';
 import CandleChart from '../components/CandleChart';
 import type { CandleChartHandle } from '../components/CandleChart';
@@ -31,7 +32,7 @@ export default function Backtest() {
   const [gridUpper, setGridUpper] = useState(70000);
   const [gridLower, setGridLower] = useState(50000);
   const [gridQuantity, setGridQuantity] = useState(20);
-  const [capital, setCapital] = useState(10000);
+  const [capital, setCapital] = useState(1000);
 
   useEffect(() => {
     switch (symbol) {
@@ -216,8 +217,12 @@ export default function Backtest() {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: '1rem', height: 'calc(100vh - 80px)', overflow: 'hidden' }}>
       {/* Parameter Panel */}
-      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', overflowY: 'auto', padding: '1rem' }}>
-        <h4 className="m-0" style={{ borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem', fontSize: '1rem' }}>Strategy Tester</h4>
+      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 0, overflow: 'hidden', borderRight: '1px solid var(--border-color)' }}>
+        <div style={{ padding: '0.8rem', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h4 className="m-0" style={{ fontSize: '0.95rem', fontWeight: 700 }}>Strategy Tester</h4>
+        </div>
+        
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
         <SymbolSelector value={symbol} onSelect={setSymbol} />
         <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Timeframe
           <select value={interval} onChange={e => setIntervalTime(e.target.value)} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', borderRadius: '4px', marginTop: '0.2rem' }}>
@@ -322,32 +327,57 @@ export default function Backtest() {
           </div>
         )}
         <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Capital
-          <input type="number" value={capital} onChange={e => setCapital(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', marginTop: '0.2rem' }} />
+          <input type="number" value={capital} onChange={e => setCapital(parseFloat(e.target.value))} style={{ width: '100%', background: 'var(--bg-dark)', border: '1px solid var(--border-color)', color: 'var(--text-main)', padding: '0.4rem', marginTop: '0.2rem', borderRadius: '4px' }} />
         </label>
-        <button onClick={runBacktest} disabled={isRunning} style={{ background: 'var(--accent-primary)', color: '#fff', border: 'none', padding: '0.7rem', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', marginTop: '0.5rem' }}>
-          {isRunning ? 'Running...' : '▶ Start Backtest'}
-        </button>
+        </div>
+
+        {/* Footer Action */}
+        <div style={{ padding: '0.8rem', borderTop: '1px solid var(--border-color)', background: 'rgba(255,255,255,0.02)' }}>
+          <button 
+            onClick={runBacktest} 
+            disabled={isRunning} 
+            style={{ 
+              width: '100%',
+              background: 'var(--accent-primary)', 
+              color: '#fff', 
+              border: 'none', 
+              padding: '0.8rem', 
+              borderRadius: '6px', 
+              fontWeight: 'bold', 
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              boxShadow: '0 4px 12px rgba(0,122,255,0.3)'
+            }}
+          >
+            {isRunning ? 'Running...' : <><Play size={14} fill="white" /> Start Backtest</>}
+          </button>
+        </div>
       </div>
 
       {/* Main Content */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', overflowY: 'auto', paddingRight: '0.25rem' }}>
-        {/* Stats */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', alignItems: 'center' }}>
-          {[
-            { label: 'Net PnL', value: netPnlDisplay, color: hasResult && backtestResult!.totalPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)' },
-            { label: 'Win Rate', value: winRateDisplay, color: '#fff' },
-            { label: 'Max DD', value: maxDdDisplay, color: 'var(--loss-color)' },
-            { label: 'P. Factor', value: hasResult ? backtestResult!.profitFactor.toFixed(2) : '--', color: '#fff' },
-            { label: 'Sharpe', value: hasResult ? backtestResult!.sharpeRatio.toFixed(2) : '--', color: '#fff' },
-            { label: 'Avg W/L', value: avgWlDisplay, color: '#fff' },
-            { label: 'Max Cons. Loss', value: hasResult ? String(backtestResult!.maxConsecutiveLosses) : '--', color: '#fff' },
-          ].map((stat, i) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.25rem 0.6rem' }}>
-              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>{stat.label}</span>
-              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: stat.color }}>{stat.value}</span>
-            </div>
-          ))}
-          <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.25rem 0.6rem' }}>
+        {/* Header & Stats bar */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+            {[
+              { label: 'Net PnL', value: netPnlDisplay, color: hasResult && backtestResult!.totalPnl >= 0 ? 'var(--profit-color)' : 'var(--loss-color)' },
+              { label: 'Win Rate', value: winRateDisplay, color: '#fff' },
+              { label: 'Max DD', value: maxDdDisplay, color: 'var(--loss-color)' },
+              { label: 'P. Factor', value: hasResult ? backtestResult!.profitFactor.toFixed(2) : '--', color: '#fff' },
+              { label: 'Sharpe', value: hasResult ? backtestResult!.sharpeRatio.toFixed(2) : '--', color: '#fff' },
+              { label: 'Avg W/L', value: avgWlDisplay, color: '#fff' },
+              { label: 'Streak Win/L', value: hasResult ? `${backtestResult!.maxConsecutiveWins}/${backtestResult!.maxConsecutiveLosses}` : '--', color: '#fff' },
+            ].map((stat, i) => (
+              <div key={i} className="glass-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', padding: '0.4rem 0.85rem', minWidth: '85px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</span>
+                <span style={{ fontSize: '0.88rem', fontWeight: 700, color: stat.color }}>{stat.value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="glass-panel" style={{ padding: '0.4rem 0.85rem', border: '1px solid rgba(255,255,255,0.06)' }}>
             <MetricsPanel trades={backtestResult?.trades ?? []} avgWin={backtestResult?.avgWin ?? 0} avgLoss={backtestResult?.avgLoss ?? 0} />
           </div>
         </div>
@@ -360,13 +390,32 @@ export default function Backtest() {
         )}
 
         {/* Tabs */}
-        <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border-color)' }}>
-          <button onClick={() => setActiveTab('charts')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'charts' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'charts' ? '2px solid var(--accent-primary)' : 'none' }}>Charts</button>
-          <button onClick={() => setActiveTab('log')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'log' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'log' ? '2px solid var(--accent-primary)' : 'none' }}>
-            Trade Log ({backtestResult?.trades.length ?? 0})
-          </button>
-          <button onClick={() => { setActiveTab('history'); loadHistory(); }} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'history' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'history' ? '2px solid var(--accent-primary)' : 'none' }}>History</button>
-          <button onClick={() => setActiveTab('compare')} style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontWeight: 'bold', padding: '0.5rem', color: activeTab === 'compare' ? 'var(--text-main)' : 'var(--text-muted)', borderBottom: activeTab === 'compare' ? '2px solid var(--accent-primary)' : 'none' }}>Compare</button>
+        <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '0.25rem' }}>
+          {[
+            { id: 'charts', label: 'Charts' },
+            { id: 'log', label: `Trade Log (${backtestResult?.trades.length ?? 0})` },
+            { id: 'history', label: 'History' },
+            { id: 'compare', label: 'Compare' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => { setActiveTab(tab.id as any); if (tab.id === 'history') loadHistory(); }}
+              style={{
+                flex: 1,
+                background: activeTab === tab.id ? 'rgba(0,122,255,0.1)' : 'transparent',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontWeight: activeTab === tab.id ? 600 : 400,
+                padding: '0.5rem 1rem',
+                color: activeTab === tab.id ? 'var(--accent-primary)' : 'var(--text-muted)',
+                transition: 'all 0.2s',
+                fontSize: '0.82rem'
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
         {/* Charts Tab */}

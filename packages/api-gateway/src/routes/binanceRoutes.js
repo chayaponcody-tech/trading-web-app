@@ -52,6 +52,28 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
     }
   });
 
+  r.get('/live/history', async (req, res) => {
+    try {
+      const { symbol, limit } = req.query;
+      const svc = getLiveService();
+      const trades = await svc.getMyTrades(symbol, undefined, parseInt(limit) || 20);
+      res.json(trades);
+    } catch (e) {
+      res.json([]);
+    }
+  });
+
+  r.get('/exchange-history', async (req, res) => {
+    try {
+      const { symbol, limit } = req.query;
+      const svc = getService();
+      const trades = await svc.getMyTrades(symbol, undefined, parseInt(limit) || 20);
+      res.json(trades);
+    } catch (e) {
+      res.json([]); // Return empty if exchange call fails (graceful)
+    }
+  });
+
   r.get('/account', async (req, res) => {
     try {
       const cfg = loadBinanceConfig();
@@ -149,7 +171,7 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
     } catch (e) { next(e); }
   });
 
-  // Trade history (legacy frontend path /api/binance/history)
+  // Trade history (Returns System Trades from Local Database)
   r.get('/history', (req, res) => {
     res.json(getAllTradesFromBots(botManager.bots));
   });
@@ -246,12 +268,12 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
 
         // Pick scan mode based on strategy type
         const scanMode = strategyType === 'grid' ? 'grid' : strategyType === 'scalp' ? 'scout' : 'precision';
-        const candidates = await scanner.scanTopUSDT(40, scanMode);
+        const candidates = await scanner.scanTopUSDT(20, scanMode);
 
         // Compute regime for top candidates in parallel (limit concurrency)
         const interval = strategyType === 'grid' ? '1h' : strategyType === 'scalp' ? '5m' : '15m';
-        const BATCH = 10;
-        for (let i = 0; i < Math.min(candidates.length, 40); i += BATCH) {
+        const BATCH = 5;
+        for (let i = 0; i < Math.min(candidates.length, 20); i += BATCH) {
           const batch = candidates.slice(i, i + BATCH);
           const results = await Promise.all(
             batch.map(c => scanner.assessSuitability(c.symbol, strategyType, interval)
@@ -289,7 +311,11 @@ export function createBinanceRoutes(botManager, portfolioManager, binanceConfig)
   r.get('/mistakes', async (req, res, next) => {
     try {
         const { getRecentMistakes } = await import('../../../data-layer/src/index.js');
-        const mistakes = getRecentMistakes(null, 20); // Get last 20 mistakes across all symbols
+        const rows = getRecentMistakes(null, 20);
+        const mistakes = rows.map(m => ({
+            ...m,
+            recordedAt: m.recordedAt && !m.recordedAt.endsWith('Z') ? m.recordedAt.replace(' ', 'T') + 'Z' : m.recordedAt
+        }));
         res.json(mistakes);
     } catch (e) { next(e); }
   });

@@ -13,11 +13,13 @@ interface Props {
   strategy: string;
   gridUpper?: number;
   gridLower?: number;
+  tp?: number;
+  sl?: number;
   onChartCreated?: (chart: IChartApi) => void;
 }
 
 export const PriceChart: React.FC<Props> = ({ 
-  data, indicators, entryPrice, entryTime, hasPosition, type, strategy, gridUpper, gridLower, onChartCreated 
+  data, indicators, entryPrice, entryTime, hasPosition, type, strategy, gridUpper, gridLower, tp, sl, onChartCreated 
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -44,12 +46,13 @@ export const PriceChart: React.FC<Props> = ({
     const candleSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#0ecb81', downColor: '#f6465d', borderVisible: false,
       wickUpColor: '#0ecb81', wickDownColor: '#f6465d',
+      priceFormat: { type: 'price', precision: 6, minMove: 0.000001 },
     });
 
-    const ema20Series = chart.addSeries(LineSeries, { color: '#2962FF', lineWidth: 2, title: 'EMA 20' });
-    const ema50Series = chart.addSeries(LineSeries, { color: '#FF6D00', lineWidth: 2, title: 'EMA 50' });
-    const bbUpper = chart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.4)', lineWidth: 1, title: 'BB Upper' });
-    const bbLower = chart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.4)', lineWidth: 1, title: 'BB Lower' });
+    const ema20Series = chart.addSeries(LineSeries, { color: '#2962FF', lineWidth: 2, title: 'EMA 20', priceFormat: { type: 'price', precision: 6, minMove: 0.000001 } });
+    const ema50Series = chart.addSeries(LineSeries, { color: '#FF6D00', lineWidth: 2, title: 'EMA 50', priceFormat: { type: 'price', precision: 6, minMove: 0.000001 } });
+    const bbUpper = chart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.4)', lineWidth: 1, title: 'BB Upper', priceFormat: { type: 'price', precision: 6, minMove: 0.000001 } });
+    const bbLower = chart.addSeries(LineSeries, { color: 'rgba(132, 142, 156, 0.4)', lineWidth: 1, title: 'BB Lower', priceFormat: { type: 'price', precision: 6, minMove: 0.000001 } });
 
     if (hasPosition && entryPrice > 0) {
       candleSeries.createPriceLine({
@@ -60,6 +63,19 @@ export const PriceChart: React.FC<Props> = ({
     if (strategy.includes('GRID') && gridUpper && gridLower) {
       candleSeries.createPriceLine({ price: gridUpper, color: '#f6465d', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'GRID TOP' });
       candleSeries.createPriceLine({ price: gridLower, color: '#f6465d', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'GRID BOT' });
+    }
+
+    if (hasPosition) {
+       if (tp && tp > 0) {
+         candleSeries.createPriceLine({
+            price: tp, color: '#0ecb81', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'TAKE PROFIT',
+         });
+       }
+       if (sl && sl > 0) {
+         candleSeries.createPriceLine({
+            price: sl, color: '#f6465d', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: 'STOP LOSS',
+         });
+       }
     }
 
     if (data.length > 0) {

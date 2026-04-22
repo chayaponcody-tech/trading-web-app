@@ -76,6 +76,99 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
     });
   });
 
+  /** 📈 Get specific fleet analytics & equity curve */
+  r.get('/fleets/:id/analytics', async (req, res, next) => {
+    try {
+      const { id } = req.params;
+      const pm = portfolioManagers.get(id);
+      
+      // Get bot IDs belonging to this fleet from the central botManager
+      const botIds = Array.from(botManager.bots.values())
+        .filter(b => b.config.managedBy === id)
+        .map(b => b.id);
+
+      const { getAllTradesByFleet } = await import('../../../data-layer/src/repositories/tradeRepository.js');
+      const { calculateSharpe, calculateMaxDrawdown, calculateProfitFactor, generateEquityCurve } = await import('../../../shared/AnalyticsUtils.js');
+
+      const trades = getAllTradesByFleet(id, botIds);
+      if (!trades || trades.length === 0) {
+        return res.json({ sharpe: 0, maxDrawdown: 0, profitFactor: 0, equityCurve: [], totalTrades: 0, winRate: 0 });
+      }
+
+      const pnlList = trades.map(t => parseFloat(t.pnl || 0));
+      const equityCurve = generateEquityCurve(trades, 1000);
+
+      res.json({
+        sharpe: calculateSharpe(pnlList),
+        maxDrawdown: calculateMaxDrawdown(equityCurve.map(e => e.value)),
+        profitFactor: calculateProfitFactor(pnlList),
+        equityCurve,
+        totalTrades: trades.length,
+        winRate: (pnlList.filter(p => p > 0).length / trades.length) * 100
+      });
+    } catch (e) { next(e); }
+  });
+
+  /** 🧠 CIO Global Portfolio Review */
+  r.get('/global-review', async (req, res, next) => {
+    try {
+      const isLive = req.query.isLive === 'true';
+      const { analyzeGlobalPortfolio } = await import('../../../ai-agents/src/index.js');
+      const { loadBinanceConfig, saveGlobalAiReport } = await import('../../../data-layer/src/index.js');
+      
+      const binanceCfg = loadBinanceConfig();
+      if (!binanceCfg.openRouterKey) return res.status(401).json({ error: 'OpenRouter Key missing' });
+
+      const allFleets = getAllFleets();
+      const filteredFleets = allFleets.filter(f => isLive ? f.config?.exchange === 'binance_live' : f.config?.exchange !== 'binance_live');
+      
+      // Enrich fleets with isRunning logic from portfolioManagers
+      const enrichedFleets = filteredFleets.map(f => {
+        const pm = portfolioManagers.get(f.id);
+        return { ...f, isRunning: pm ? pm.isRunning : false };
+      });
+      
+      const allBots = Array.from(botManager.bots.values()).filter(b => isLive ? b.config?.exchange === 'binance_live' : b.config?.exchange !== 'binance_live');
+      const report = await analyzeGlobalPortfolio(enrichedFleets, allBots, binanceCfg.openRouterKey, binanceCfg.openRouterModel);
+      
+      // Save for future knowledge retrieval / RAG
+      saveGlobalAiReport(report);
+
+      res.json({ report });
+    } catch (e) { next(e); }
+  });
+
+  /** ⚡ AI Master Strategy Wizard (AI CIO) */
+  r.post('/propose-strategy', async (req, res, next) => {
+    try {
+      const { totalAmount } = req.body;
+      const { proposeFundStrategy } = await import('../../../ai-agents/src/index.js');
+      const { loadBinanceConfig } = await import('../../../data-layer/src/index.js');
+      
+      const binanceCfg = loadBinanceConfig();
+      if (!binanceCfg.openRouterKey) return res.status(401).json({ error: 'OpenRouter Key missing' });
+
+      // Get market context
+      const tickersArr = await exchange.get24hTickers();
+      const topTickers = (Array.isArray(tickersArr) ? tickersArr : Object.values(tickersArr))
+        .sort((a, b) => (b.quoteVolume || 0) - (a.quoteVolume || 0))
+        .slice(0, 30);
+
+      // Returns all 3 tiers (safe, balanced, aggressive)
+      const strategies = await proposeFundStrategy(
+        totalAmount, 
+        topTickers, 
+        binanceCfg.openRouterKey, 
+        binanceCfg.openRouterModel
+      );
+
+      res.json(strategies);
+    } catch (e) { 
+      console.error('❌ [propose-strategy] Critical Error:', e);
+      next(e); 
+    }
+  });
+
   /** ⚙️ Update fleet settings */
   r.post('/fleets/:id/settings', async (req, res) => {
     const { id } = req.params;
@@ -148,7 +241,58 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
     }
   });
 
+  /** ⏯️ Toggle all bots in fleet */
+  r.post('/fleets/:id/bots-action', async (req, res) => {
+    const { id } = req.params;
+    const { action } = req.body; // 'start' or 'stop'
+
+    try {
+      const botsInFleet = Array.from(botManager.bots.values())
+        .filter(b => (b.managedBy || b.config?.managedBy) === id);
+
+      for (const bot of botsInFleet) {
+        if (action === 'start') {
+          botManager.resumeBot(bot.id);
+        } else {
+          botManager.stopBot(bot.id);
+        }
+      }
+
+      res.json({ success: true, count: botsInFleet.length });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /** 🚀 Clone fleet to Live Production */
+  r.post('/fleets/:id/clone-live', async (req, res) => {
+    const { id } = req.params;
+    try {
+      const sourceFleet = getFleetById(id);
+      if (!sourceFleet) return res.status(404).json({ error: 'Source fleet not found' });
+
+      const newId = 'fleet_live_' + Math.random().toString(36).substr(2, 6);
+      const liveFleet = {
+        ...sourceFleet,
+        id: newId,
+        name: `${sourceFleet.name} (LIVE)`,
+        isRunning: 0,
+        config: {
+          ...sourceFleet.config,
+          exchange: 'binance_live',
+          isAutonomous: false // Start as stopped for safety
+        }
+      };
+
+      upsertFleet(liveFleet);
+      res.json({ message: 'Fleet cloned to Production (Live). Ready to activate.', fleet: liveFleet });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   /** 🗑️ Delete fleet */
+
   r.delete('/fleets/:id', (req, res) => {
     const { id } = req.params;
     const pm = portfolioManagers.get(id);
@@ -169,6 +313,34 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
       res.json({ success: true, message: 'Fleet review triggered.', currentAction: pm.currentAction, logs: pm.logs.slice(0, 10) });
     } catch (e) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  /** ⚙️ Update Fleet Settings (Confidence/Model) */
+  r.put('/fleets/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { minConfidence } = req.body;
+
+      if (minConfidence === undefined) return res.status(400).json({ error: 'minConfidence is required' });
+
+      // 1. Update Database
+      await db.execute(
+        'UPDATE fleets SET minConfidence = ? WHERE id = ?',
+        [minConfidence, id]
+      );
+
+      // 2. Update Live Engine (If active)
+      const pm = portfolioManagers.get(id);
+      if (pm) {
+        pm.config.minConfidence = parseFloat(minConfidence);
+        log.info(`[Fleet] Updated LIVE fleet ${id} minConfidence to ${minConfidence}%`);
+      }
+
+      res.json({ success: true, message: 'Settings updated' });
+    } catch (error) {
+      log.error(`[Fleet Update Error] ${error.message}`);
+      res.status(500).json({ error: error.message });
     }
   });
 

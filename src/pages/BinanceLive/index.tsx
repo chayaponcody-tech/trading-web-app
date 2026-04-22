@@ -9,22 +9,23 @@ import BotSidebar from './components/BotSidebar';
 import BotCard from './components/BotCard';
 import AnalyticsTab from './components/AnalyticsTab';
 import PositionChartModal from './components/PositionChartModal';
-import { API, type Bot } from './types';
+import { API, type Bot, normalizeSymbol } from './types';
 
-export default function BinanceLive() {
+
+export default function BinanceLive({ isRealMode = false }: { isRealMode?: boolean }) {
   const {
     bots, fleets, accountInfo, binanceKeys,
     tradeMemory, tradeHistory, fetchingHistory,
     analyticsData,
     activeTab, setActiveTab,
     fetchStatus, fetchAccount, fetchHistory, fetchMemory, fetchAnalytics,
-  } = useTradingData();
+  } = useTradingData({ isRealMode });
 
   // Modal States
-  const [chartData, setChartData] = useState<{ symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number } | null>(null);
+  const [chartData, setChartData] = useState<{ symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number, tp?: number, sl?: number } | null>(null);
 
-  const handleViewChart = (symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number) => {
-    setChartData({ symbol, interval, price, entryTime, type, reason, strategy, gridUpper, gridLower });
+  const handleViewChart = (symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number, tp?: number, sl?: number) => {
+    setChartData({ symbol, interval, price, entryTime, type, reason, strategy, gridUpper, gridLower, tp, sl });
   };
   const [searchTerm, setSearchTerm] = useState('');
   const [sortBy, setSortBy] = useState<'pnl' | 'symbol' | 'started' | 'none'>('pnl');
@@ -64,7 +65,7 @@ export default function BinanceLive() {
       await fetch(`${API}/api/forward-test/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...config, exchange: 'binance_testnet' }),
+        body: JSON.stringify({ ...config, exchange: isRealMode ? 'binance_live' : 'binance_testnet' }),
       });
       await fetchStatus();
     } finally {
@@ -109,8 +110,25 @@ export default function BinanceLive() {
 
   const handleManualClose = async (symbol: string, type: string, qty: number) => {
     if (!window.confirm(`ปิดออเดอร์ ${symbol} ${type} จำนวน ${qty}?`)) return;
-    await fetch(`${API}/api/binance/close-manual`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol, type, quantity: qty }) });
+    await fetch(`${API}/api/binance/close-manual`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol, type, quantity: qty, isLive: isRealMode }) });
     await fetchAccount();
+  };
+
+  const handleAdopt = (symbol: string) => {
+    // 1. Check if there is already a running bot for this symbol
+    const existingBot = bots.find(b => 
+      normalizeSymbol(b.config.symbol) === normalizeSymbol(symbol) && 
+      b.isRunning
+    );
+
+    if (existingBot) {
+      // 2. UI Alert & Stop to save AI Tokens
+      alert(`⚠️ มีบอทกำลังควบคุม ${symbol} อยู่แล้ว (ID: ${existingBot.id.slice(0, 8)})\nคุณไม่จำเป็นต้อง Adopt ใหม่ครับ หากต้องการเปลี่ยนกลยุทธ์ให้หยุดบอทตัวเดิมก่อน`);
+      return;
+    }
+    
+    // Instead of direct adoption, we trigger AI analysis first as requested
+    handleAIRecommend('confident', symbol, 'EMA_SCALP', '15m');
   };
 
   const handleAIRecommend = async (mode: 'confident' | 'grid' | 'scout', symbol: string, strategy: string, interval: string) => {
@@ -239,6 +257,11 @@ export default function BinanceLive() {
 
   const confirmAIRecommendation = () => {
     if (!aiRecommendation) return;
+    
+    // Check if we are adopting an existing position (the symbol should be in activePositions but no managed bot)
+    const isAdopting = activePositions.some(p => normalizeSymbol(p.symbol) === normalizeSymbol(aiRecommendation.symbol)) && 
+                       !bots.some(b => normalizeSymbol(b.config.symbol) === normalizeSymbol(aiRecommendation.symbol) && b.isRunning);
+
     handleStart({
       symbol: aiRecommendation.symbol,
       interval: aiRecommendation.interval,
@@ -255,9 +278,16 @@ export default function BinanceLive() {
       gridLower: aiRecommendation.grid_lower,
       positionSizeUSDT: positionSizeUSDT, // CRITICAL FIX: Use shared capital
       entry_steps: aiRecommendation.entry_steps,
-      managedBy: 'manual'
+      managedBy: 'manual',
+      isAdopted: isAdopting,
+      exchange: 'binance_testnet' // Ensure it's visible in Filter
     });
+    
     setShowAIModal(false);
+    if (isAdopting) {
+       setActiveTab('dashboard');
+       alert(`🛡️ กำลังสร้างบอท AI เพื่อเข้าควบคุม ${aiRecommendation.symbol} กรุณารักษาหน้าต่างนี้ไว้สักครู่ครับ`);
+    }
   };
 
   // ─── Filtering & Grouping Logic ───────────────────────────────────────────────
@@ -322,23 +352,54 @@ export default function BinanceLive() {
       else if (groupBy === 'aiType') {
          key = (bot.config as any).aiType === 'confident' ? '✨ AI Confident' : (bot.config as any).aiType === 'scout' ? '🏹 AI Scout' : (bot.config as any).aiType === 'grid' ? '📏 AI Grid' : '🛠️ Manual/Strategy';
       } else if (groupBy === 'fleet') {
-        const managedBy = (bot.config as any).managedBy;
+        // Support both config.managedBy and root-level managedBy for robustness
+        const managedBy = (bot.config as any).managedBy || (bot as any).managedBy;
         const fleet = fleets.find(f => f.id === managedBy);
-        if (fleet) key = `🚀 ${fleet.name}`;
-        else if (managedBy === 'manual') key = '🛠️ Manual';
-        else key = '🛠️ Manual / Unassigned';
+        
+        if (fleet) {
+          key = `🚀 ${fleet.name}`;
+        } else if (managedBy === 'manual') {
+          key = '🛠️ Manual Operations';
+        } else {
+          key = '🛠️ Manual / Unassigned';
+        }
       }
       if (!groups[key]) groups[key] = [];
       groups[key].push(bot);
     });
-    return groups;
+
+    // Sort keys so Manual is usually at the bottom or top consistently
+    const sortedKeys = Object.keys(groups).sort((a, b) => {
+      if (a.includes('Manual')) return 1;
+      if (b.includes('Manual')) return -1;
+      return a.localeCompare(b);
+    });
+
+    const sortedGroups: { [key: string]: Bot[] } = {};
+    sortedKeys.forEach(k => { sortedGroups[k] = groups[k]; });
+    return sortedGroups;
   };
+
 
   const groupedBots = getGroupedBots();
 
   // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', gap: sidebarMode === 'none' ? '0' : '1rem', height: '100%', overflow: 'hidden', position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      {/* Dynamic Warning Banner based on connection mode */}
+      {isRealMode ? (
+        <div style={{ background: 'linear-gradient(90deg, #f6465d22, #f6465d11)', border: '1px solid #f6465d55', borderRadius: '6px', padding: '0.35rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.78rem', color: '#f6465d', margin: '0 0 0.5rem 0', flexShrink: 0 }}>
+          <span style={{ fontSize: '1.1rem' }}>⚠️</span>
+          <span><strong>LIVE TRADING — เงินจริง</strong> — ทุก order ที่ส่งจะถูก execute บน Binance Futures ด้วยเงินจริง ตรวจสอบ config ให้ถูกต้องก่อนเริ่ม bot</span>
+        </div>
+      ) : (
+        <div style={{ background: 'linear-gradient(90deg, #1890ff22, #1890ff11)', border: '1px solid #1890ff55', borderRadius: '6px', padding: '0.35rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.78rem', color: '#1890ff', margin: '0 0 0.5rem 0', flexShrink: 0 }}>
+          <span style={{ fontSize: '1.1rem' }}>🧪</span>
+          <span><strong>TESTNET SIMULATOR</strong> — No real funds are at risk.</span>
+        </div>
+      )}
+      
+      <div style={{ display: 'flex', gap: sidebarMode === 'none' ? '0' : '1rem', flex: 1, height: '100%', overflow: 'hidden', position: 'relative' }}>
       
       {/* 3-Stage Toggle Button — desktop only */}
       <button 
@@ -577,7 +638,17 @@ export default function BinanceLive() {
           </>
         )}
 
-        {activeTab === 'positions' && <PositionsTab activePositions={activePositions} bots={bots} fleets={fleets} onManualClose={handleManualClose} onRefresh={fetchAccount} onViewChart={handleViewChart} />}
+        {activeTab === 'positions' && (
+          <PositionsTab 
+            activePositions={activePositions} 
+            bots={bots} 
+            fleets={fleets} 
+            onManualClose={handleManualClose} 
+            onAdopt={handleAdopt}
+            onRefresh={async () => { await fetchAccount(); await fetchStatus(); }} 
+            onViewChart={handleViewChart}
+          />
+        )}
         {activeTab === 'analytics' && <AnalyticsTab analyticsData={analyticsData} />}
         {activeTab === 'history' && <HistoryTab tradeHistory={tradeHistory} fetchingHistory={fetchingHistory} fetchHistory={fetchHistory} />}
         {activeTab === 'tuning' && <TuningLogs />}
@@ -594,6 +665,8 @@ export default function BinanceLive() {
             strategy={chartData.strategy}
             gridUpper={chartData.gridUpper}
             gridLower={chartData.gridLower}
+            tp={chartData.tp}
+            sl={chartData.sl}
             onClose={() => setChartData(null)} 
           />
         )}
@@ -678,6 +751,7 @@ export default function BinanceLive() {
         }
       `}</style>
 
+    </div>
     </div>
   );
 }

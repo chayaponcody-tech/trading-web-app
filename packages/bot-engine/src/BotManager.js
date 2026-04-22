@@ -3,11 +3,12 @@ import { getPythonSignal } from './PythonStrategyClient.js';
 import { applySlippage, computePositionSize, computeTPSL } from './Backtester.js';
 import { emaCalc, computeATR } from '../../shared/indicators.js';
 import { reflect } from '../../ai-agents/src/ReflectionAgent.js';
+import { callOpenRouter } from '../../ai-agents/src/index.js';
 import { reviewBot } from '../../ai-agents/src/ReviewerAgent.js';
 import { assessTrailingAdjustment } from '../../ai-agents/src/TrailingAIAgent.js';
 import { saveBotMap, deleteBot } from '../../data-layer/src/repositories/botRepository.js';
 import { appendTrade } from '../../data-layer/src/repositories/tradeRepository.js';
-import { saveMistake, getRecentMistakes } from '../../data-layer/src/index.js';
+import { saveMistake, getRecentMistakes, updateTradeMemoryLesson } from '../../data-layer/src/index.js';
 import { TZ_OPTS } from '../../shared/config.js';
 import { TuningService } from './TuningService.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
@@ -58,13 +59,15 @@ export class BotManager {
   }
 
   // ─── Exchange Selector ───────────────────────────────────────────────────────
-  /** Returns the correct exchange instance based on bot config */
+  /** Returns the correct exchange instance based on bot or fleet config */
   _getExchange(bot) {
-    if (bot?.config?.exchange === 'binance_live' && this.liveExchange) {
+    const targetExchange = bot?.config?.exchange || this.config.exchange;
+    if (targetExchange === 'binance_live' && this.liveExchange) {
       return this.liveExchange;
     }
     return this.exchange;
   }
+
 
   /** Returns a log prefix indicating bot mode */
   _mode(bot) {
@@ -114,6 +117,15 @@ export class BotManager {
     };
 
     this.bots.set(botId, bot);
+    
+    // Feature: Adopting an existing position
+    if (botConfig.isAdopted) {
+      console.log(`[BotManager] Bot ${botId} started in ADOPTION mode for ${botConfig.symbol}. Linking position...`);
+      // Run reattach immediately for this symbol. 
+      // It will find the position and push it into candidatesBot (this one).
+      setTimeout(() => this.reattachOrphanPositions(botConfig.symbol), 500); 
+    }
+
     this._scheduleBot(botId);
     this._save();
     console.log(`[BotManager] Started ${botId}: ${botConfig.symbol} ${botConfig.strategy}`);
@@ -177,8 +189,8 @@ export class BotManager {
         this.notificationService.send(`🕯️ *System Recovery:* กู้คืนบอทสำเร็จ \`${savedBots.length}\` ตัว เข้าสู่ระบบจัดการอัตโนมัติแล้วค่ะ`);
       }
 
-      // Scan for orphan positions not managed by any bot
-      setTimeout(() => this.reattachOrphanPositions(), 5000);
+      // Automatic orphan scan disabled per user request. 
+      // Manual adoption will be handled via UI button.
     } catch (e) {
       console.error('[BotManager] Failed to resurrect bots:', e.message);
     }
@@ -225,15 +237,6 @@ export class BotManager {
     }
   }
 
-  loadBots(botsArray) {
-    botsArray.forEach((bot) => {
-      this.bots.set(bot.id, bot);
-      if (bot.isRunning && bot.config.exchange === 'binance_testnet') {
-        this.resumeBot(bot.id);
-      }
-    });
-    console.log(`[BotManager] Loaded ${botsArray.length} bot(s).`);
-  }
 
   // ─── Private ─────────────────────────────────────────────────────────────────
 
@@ -278,6 +281,9 @@ export class BotManager {
 
       const closed = klines.slice(0, -1);
       const closes = closed.map((k) => parseFloat(k[4]));
+      const highs = closed.map((k) => parseFloat(k[2]));
+      const lows = closed.map((k) => parseFloat(k[3]));
+      const volumes = closed.map((k) => parseFloat(k[5]));
       const lastCloseTime = closed.at(-1)?.[6] ?? null;
       const currPrice = parseFloat(ticker.price);
 
@@ -329,6 +335,12 @@ export class BotManager {
           });
         });
       } else if (remotePos.length === 0 && bot.openPositions.length > 0) {
+        // POSITION WAS CLOSED EXTERNALLY (Manually or by Binance native TP/SL/Liquidation)
+        for (const pos of [...bot.openPositions]) {
+          console.warn(`[Bot ${botId}] 🔔 Position for ${symbol} was closed on exchange. Syncing history...`);
+          // Use current price as exit price for the record
+          await this._closePosition(bot, pos, currPrice, 'Binance/External Close').catch(e => console.error(`[SyncClose] ${e.message}`));
+        }
         bot.openPositions = [];
       }
 
@@ -397,8 +409,8 @@ export class BotManager {
 
       // ── Signal on new candle ───────────────────────────────────────────────
       this.tickCount++;
-      if (this.tickCount % 50 === 0) {
-        this.tuningService.tuneBot(bot, closes).catch(e => console.error(e.message));
+      if (this.tickCount % 50 === 0 && highs.length > 0 && highs.length === closes.length) {
+        this.tuningService.tuneBot(bot, closes, highs, lows, volumes).catch(e => console.error(e.message));
       }
 
       // ── Generate Live Thought ───────────────────────────────────────────────
@@ -415,9 +427,9 @@ export class BotManager {
         try {
           const result = await getPythonSignal(stratKey, {
             closes,
-            highs: klines.slice(0, -1).map(k => parseFloat(k[2])),
-            lows: klines.slice(0, -1).map(k => parseFloat(k[3])),
-            volumes: klines.slice(0, -1).map(k => parseFloat(k[5])),
+            highs,
+            lows,
+            volumes,
             params: bot.config,
             symbol,
           });
@@ -472,8 +484,22 @@ export class BotManager {
                     pos.dynamicTp = pos.type === 'LONG' ? ep + atr * tpMult : ep - atr * tpMult;
                     pos.atrValue  = atr;
                     pos.regime    = regime;
-                    pos.entryReason = (pos.entryReason || '') +
-                      ` | ATR=${atr.toFixed(4)} SL=${pos.dynamicSl.toFixed(4)} TP=${pos.dynamicTp.toFixed(4)} regime=${regime}`;
+                    
+                    const reason = `ATR=${atr.toFixed(4)} (SL dist=${slMult}x, TP dist=${tpMult}x) regime=${regime}`;
+                    pos.entryReason = (pos.entryReason || '') + ` | ${reason}`;
+
+                    // Log initial AI target setting
+                    bot.aiHistory = bot.aiHistory || [];
+                    bot.aiHistory.push({
+                      time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }),
+                      reason: `[AI Initial Targets] TP: ${pos.dynamicTp.toFixed(4)}, SL: ${pos.dynamicSl.toFixed(4)} — ${reason}`,
+                      decision: 'INITIAL_TARGETS',
+                      model: bot.lastAiModel || 'StrategyAI',
+                      changes: {
+                        tp: { from: 'Default', to: pos.dynamicTp.toFixed(4) },
+                        sl: { from: 'Default', to: pos.dynamicSl.toFixed(4) }
+                      }
+                    });
                   } else if (bot._pendingPythonStoploss != null) {
                     pos.pythonStoploss = bot._pendingPythonStoploss;
                     pos.entryReason = (pos.entryReason || '') + ` | SL=${bot._pendingPythonStoploss.toFixed(4)}`;
@@ -623,6 +649,13 @@ export class BotManager {
 
     for (const s of steps) {
       const stepQty = Math.floor((rawTotalQty * (s.weightPct / 100)) / rule.stepSize) * rule.stepSize;
+      
+      // Binance Live Safety: Skip orders below 5.1 USDT notional to avoid -4164 error
+      if (bot.config.exchange === 'binance_live' && (stepQty * currPrice) < 5.1 && stepQty > 0) {
+        // console.warn(`[Bot ${bot.id}] Skipping step: Notional ${(stepQty * currPrice).toFixed(2)} USDT < 5.1 USDT minimum.`);
+        continue;
+      }
+
       if (stepQty < rule.minQty) continue;
 
       const qtyStr = stepQty.toFixed(rule.precision || 3);
@@ -702,7 +735,16 @@ export class BotManager {
   async _closePosition(bot, pos, currPrice, reason) {
     try {
       const symbol = bot.config.symbol.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
-      await this._getExchange(bot).closePosition(symbol, pos.type, pos.quantity);
+      
+      // Attempt to close on exchange (might fail if already closed externally)
+      if (!reason.includes('External')) {
+        try {
+          await this._getExchange(bot).closePosition(symbol, pos.type, pos.quantity);
+        } catch (e) {
+          console.warn(`[Bot ${bot.id}] Exchange close call skipped or failed: ${e.message}`);
+        }
+      }
+
       bot.openPositions = bot.openPositions.filter((p) => p.id !== pos.id);
 
       // Apply slippage to exit price for accurate PnL calculation (Requirement 3.7)
@@ -724,6 +766,7 @@ export class BotManager {
         entryReason: pos.entryReason || 'Technical Entry',
         strategy: bot.config.strategy,
         entryTime: pos.entryTime,
+        fleetId: bot.config.managedBy || null,
       };
 
       bot.lastExitTime = new Date().toISOString();
@@ -807,12 +850,20 @@ export class BotManager {
         if (adjustment.action === 'EXTEND_TP' && adjustment.newTpPercent) {
           const oldTp = bot.config.tpPercent;
           bot.config.tpPercent = adjustment.newTpPercent;
+          
+          if (pos.dynamicTp) {
+             pos.dynamicTp = pos.entryPrice * (1 + (pos.type === 'LONG' ? adjustment.newTpPercent / 100 : -adjustment.newTpPercent / 100));
+          }
+
           console.log(`[Bot ${botId}] 🎯 AI Extended TP: ${oldTp}% → ${adjustment.newTpPercent}% — ${adjustment.reason}`);
           bot.aiHistory.push({
             time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }),
-            message: `[AI TP Extended] ${oldTp}% → ${adjustment.newTpPercent}% — ${adjustment.reason}`,
+            reason: `[AI TP Extended] ${oldTp}% → ${adjustment.newTpPercent}% — ${adjustment.reason}`,
             decision: 'EXTEND_TP',
             model: preferredModel,
+            changes: {
+              tpPercent: { from: `${oldTp}%`, to: `${adjustment.newTpPercent}%` }
+            }
           });
         } else if (adjustment.action === 'TIGHTEN_TRAIL' && adjustment.newTrailingPct) {
           const oldTrail = bot.config.trailingStopPct;
@@ -822,9 +873,12 @@ export class BotManager {
           console.log(`[Bot ${botId}] 🔒 AI Tightened Trail: ${oldTrail}% → ${adjustment.newTrailingPct}% — ${adjustment.reason}`);
           bot.aiHistory.push({
             time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }),
-            message: `[AI Trail Tightened] ${oldTrail}% → ${adjustment.newTrailingPct}% — ${adjustment.reason}`,
+            reason: `[AI Trail Tightened] ${oldTrail}% → ${adjustment.newTrailingPct}% — ${adjustment.reason}`,
             decision: 'TIGHTEN_TRAIL',
             model: preferredModel,
+            changes: {
+              trailingStopPct: { from: `${oldTrail}%`, to: `${adjustment.newTrailingPct}%` }
+            }
           });
         }
       }
@@ -854,9 +908,14 @@ export class BotManager {
     bot.aiHistory = bot.aiHistory || [];
     bot.aiHistory.push({
       time: new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Bangkok' }), // Formats as YYYY-MM-DD HH:MM:SS in local BK time
-      message: result.reason,
+      reason: result.reason,
       decision: result.shouldUpdate ? 'UPDATED' : 'STAY',
-      model: preferredModel
+      model: preferredModel,
+      changes: result.shouldUpdate ? {
+         strategy: result.strategy ? { from: 'Current', to: result.strategy } : null,
+         tp: result.tp ? { from: 'Current', to: `${result.tp}%` } : null,
+         sl: result.sl ? { from: 'Current', to: `${result.sl}%` } : null
+      } : null
     });
 
     console.log(`[Bot ${botId}] AI Review: ${result.shouldUpdate ? '✅ Updated' : '⏸️ No change'} — ${result.reason?.slice(0, 80)}`);
@@ -1097,34 +1156,45 @@ export class BotManager {
   // to a running bot that matches symbol + side. If no bot matches,
   // creates a lightweight "guardian" bot to manage the position.
 
-  async reattachOrphanPositions() {
+  async reattachOrphanPositions(targetSymbol = null) {
     if (!this.exchange) return;
 
     let accountInfo;
     try {
-      accountInfo = await this._getExchange(bot).getAccountInfo();
+      // Use the primary exchange instance (this.exchange)
+      accountInfo = await this.exchange.getAccountInfo();
     } catch (e) {
       console.error('[BotManager] reattachOrphanPositions: getAccountInfo failed:', e.message);
       return;
     }
 
-    const remotePositions = (accountInfo.positions || []).filter(
+    const normalize = (s) => s.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
+
+    let remotePositions = (accountInfo.positions || []).filter(
       (p) => parseFloat(p.positionAmt) !== 0
     );
+
+    if (targetSymbol) {
+      remotePositions = remotePositions.filter(p => normalize(p.symbol) === normalize(targetSymbol));
+      console.log(`[BotManager] Targeted reattach for ${targetSymbol}: found ${remotePositions.length} position(s)`);
+    }
 
     if (remotePositions.length === 0) return;
 
     for (const rp of remotePositions) {
-      const symbol = rp.symbol.toUpperCase();
+      const remoteSymbol = rp.symbol.toUpperCase();
+      const symbol = remoteSymbol; // Alias for compatibility with code below
       const amt = parseFloat(rp.positionAmt);
       const side = amt > 0 ? 'LONG' : 'SHORT';
       const entryPrice = parseFloat(rp.entryPrice);
+
+      const normalize = (s) => s.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
 
       // Check if any running bot already manages this symbol + side
       const managingBot = [...this.bots.values()].find(
         (b) =>
           b.isRunning &&
-          b.config.symbol.toUpperCase() === symbol &&
+          normalize(b.config.symbol) === normalize(remoteSymbol) &&
           b.openPositions.some((p) => p.type === side)
       );
 
@@ -1132,7 +1202,7 @@ export class BotManager {
 
       // Find a running bot for this symbol (any side) to attach to
       const candidateBot = [...this.bots.values()].find(
-        (b) => b.isRunning && b.config.symbol.toUpperCase() === symbol
+        (b) => b.isRunning && normalize(b.config.symbol) === normalize(remoteSymbol)
       );
 
       const posEntry = {
@@ -1174,6 +1244,7 @@ export class BotManager {
             interval: '15m',
             aiCheckInterval: 30,
             isGuardian: true,
+            exchange: 'binance_testnet'
           },
           expiresAt: null,
           openPositions: [posEntry],
@@ -1242,7 +1313,7 @@ export class BotManager {
           if (!pos.trailingSl || newSl > pos.trailingSl) {
             pos.trailingSl = newSl;
             console.log(
-              `[Bot ${botId}] 📈 ATR Trail ↑ ${newSl.toFixed(4)} ` +
+              `[Bot ${botId}] ${bot.config.symbol} (${bot.config.strategy}) 📈 ATR Trail ↑ ${newSl.toFixed(4)} ` +
               `(peak: ${pos.highestPrice.toFixed(4)}, ATR×${trailMult} regime=${regime})`
             );
           }
@@ -1252,7 +1323,7 @@ export class BotManager {
           if (!pos.trailingSl || newSl < pos.trailingSl) {
             pos.trailingSl = newSl;
             console.log(
-              `[Bot ${botId}] 📉 ATR Trail ↓ ${newSl.toFixed(4)} ` +
+              `[Bot ${botId}] ${bot.config.symbol} (${bot.config.strategy}) 📉 ATR Trail ↓ ${newSl.toFixed(4)} ` +
               `(trough: ${pos.lowestPrice.toFixed(4)}, ATR×${trailMult} regime=${regime})`
             );
           }
@@ -1305,11 +1376,7 @@ export class BotManager {
       
       สรุปบทเรียนสั้นๆ 1 ประโยคว่าทำไมถึงแพ้ และควรระวังอะไรในสภาวะตลาดแบบนี้ในอนาคต?`;
 
-      const aiResponse = await ReflectionAgent.analyze(
-        [], 'MistakeAnalysis', prompt, 
-        this.binanceConfig.openRouterKey, 
-        this.binanceConfig.openRouterModel
-      );
+      const aiResponse = await callOpenRouter(prompt, this.config.openRouterKey, this.config.openRouterModel);
 
       saveMistake({
         botId,
@@ -1321,6 +1388,9 @@ export class BotManager {
         marketContext: trade.entryReason,
         aiLesson: aiResponse || 'Unknown cause'
       });
+      
+      // Also update the row in ai_memory so it shows up in the Memory Tab
+      updateTradeMemoryLesson(trade.symbol, trade.exitTime, aiResponse || 'Unknown cause');
       
       console.log(`🧠 [AI Lesson Learned] ${trade.symbol}: ${aiResponse}`);
     } catch (e) {

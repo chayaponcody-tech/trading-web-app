@@ -18,8 +18,8 @@ export function appendTrade(trade) {
     try {
       // 1. Insert into ai_memory (Historical Insight)
       db.prepare(`
-        INSERT INTO ai_memory (symbol, type, pnl, strategy, reason, entryPrice, exitPrice, exitTime, recordedAt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO ai_memory (symbol, type, pnl, strategy, reason, entryPrice, exitPrice, exitTime, recordedAt, aiLesson)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         trade.symbol,
         trade.type,
@@ -29,13 +29,14 @@ export function appendTrade(trade) {
         trade.entryPrice,
         trade.exitPrice,
         trade.exitTime,
-        new Date().toISOString()
+        new Date().toISOString(),
+        trade.aiLesson || null
       );
 
       // 2. Insert into trades (Close History UI)
       db.prepare(`
-        INSERT INTO trades (botId, symbol, type, entryPrice, exitPrice, pnl, entryTime, exitTime, reason, strategy, entryReason)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO trades (botId, symbol, type, entryPrice, exitPrice, pnl, entryTime, exitTime, reason, strategy, entryReason, aiLesson, fleetId)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         trade.botId,
         trade.symbol,
@@ -47,7 +48,9 @@ export function appendTrade(trade) {
         trade.exitTime,
         trade.reason,
         trade.strategy,
-        trade.entryReason
+        trade.entryReason,
+        trade.aiLesson || null,
+        trade.fleetId || null
       );
 
       return true;
@@ -64,7 +67,6 @@ export function appendTrade(trade) {
 export function getAllTradesFromBots(botsMap) {
   if (useSqlite) {
     try {
-      // From SQLite, we might want all trades ever recorded in 'trades' table
       const rows = db.prepare('SELECT * FROM trades ORDER BY exitTime DESC').all();
       return rows;
     } catch { return []; }
@@ -83,27 +85,67 @@ export function getAllTradesFromBots(botsMap) {
   return all.sort((a, b) => new Date(b.exitTime || 0) - new Date(a.exitTime || 0));
 }
 
+export function getAllTradesByFleet(fleetId, botIds = []) {
+  if (useSqlite) {
+    try {
+      if (botIds.length === 0) {
+        return db.prepare('SELECT * FROM trades WHERE fleetId = ? ORDER BY exitTime ASC').all(fleetId);
+      } else {
+        const placeholders = botIds.map(() => '?').join(',');
+        return db.prepare(`
+          SELECT * FROM trades 
+          WHERE fleetId = ? OR botId IN (${placeholders})
+          ORDER BY exitTime ASC
+        `).all(fleetId, ...botIds);
+      }
+    } catch { return []; }
+  }
+  return [];
+}
+
 // ─── AI Mistakes Repository ──────────────────────────────────────────────────
 
 export function saveMistake(mistake) {
+  if (!useSqlite) return false;
+  try {
+    db.prepare(`
+      INSERT INTO trade_mistakes (botId, symbol, strategy, entryPrice, exitPrice, pnl, marketContext, aiLesson)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      mistake.botId,
+      mistake.symbol,
+      mistake.strategy,
+      mistake.entryPrice || 0,
+      mistake.exitPrice || 0,
+      mistake.pnl || 0,
+      mistake.marketContext || '',
+      mistake.aiLesson || ''
+    );
+    return true;
+  } catch (e) {
+    console.error('[TradeRepo] saveMistake SQL error:', e.message);
+    return false;
+  }
+}
+
+export function updateTradeMemoryLesson(symbol, exitTime, aiLesson) {
   if (useSqlite) {
     try {
+      // 1. Update ai_memory
       db.prepare(`
-        INSERT INTO trade_mistakes (botId, symbol, strategy, entryPrice, exitPrice, pnl, marketContext, aiLesson)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        mistake.botId,
-        mistake.symbol,
-        mistake.strategy,
-        mistake.entryPrice || 0,
-        mistake.exitPrice || 0,
-        mistake.pnl || 0,
-        mistake.marketContext || '',
-        mistake.aiLesson || ''
-      );
+        UPDATE ai_memory SET aiLesson = ? 
+        WHERE symbol = ? AND exitTime = ?
+      `).run(aiLesson, symbol, exitTime);
+
+      // 2. Update trades (Close History UI)
+      db.prepare(`
+        UPDATE trades SET aiLesson = ? 
+        WHERE symbol = ? AND exitTime = ?
+      `).run(aiLesson, symbol, exitTime);
+
       return true;
     } catch (e) {
-      console.error('[TradeRepo] saveMistake SQL error:', e.message);
+      console.error('[TradeRepo] updateTradeMemoryLesson error:', e.message);
       return false;
     }
   }

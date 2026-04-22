@@ -1,5 +1,5 @@
 import { Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare, Layers, Brain, TrendingUp, Search, Wallet, FileCode, Zap, LayoutList, BookOpen } from 'lucide-react';
+import { Settings, Terminal, FlaskConical, Bot, ShieldCheck, MessageSquare, Layers, Brain, TrendingUp, Search, Wallet, FileCode, Zap, LayoutList, BookOpen, Crown, DollarSign, Database, Crosshair, Shuffle } from 'lucide-react';
 import './App.css';
 
 const sectionLabel = (text: string) => (
@@ -19,13 +19,27 @@ function Sidebar() {
     </Link>
   );
 
-  const cryptoItems = [
-    { path: '/portfolio', name: 'AI Portfolio (PORT)', icon: <ShieldCheck size={20} color="#00d1ff" /> },
-    { path: '/binance-live', name: 'Binance (Live Sim)', icon: <Bot size={20} color="#faad14" /> },
-    { path: '/binance-real', name: 'Binance (Live 🔴)', icon: <Bot size={20} color="#f6465d" /> },
-    { path: '/backtest', name: 'Backtest (ทดสอบ)', icon: <FlaskConical size={20} /> },
+  const testExecutionItems = [
+    { path: '/portfolio', name: 'Paper Portfolio (TEST)', icon: <ShieldCheck size={20} color="#00d1ff" /> },
+    { path: '/binance-test', name: 'Binance (Testnet)', icon: <Bot size={20} color="#00d1ff" /> },
+  ];
+
+  const liveExecutionItems = [
+    { path: '/portfolio-live', name: 'Paper Portfolio (LIVE)', icon: <ShieldCheck size={20} color="#f6465d" /> },
+    { path: '/binance-real', name: 'Binance (Live)', icon: <Bot size={20} color="#f6465d" /> },
+  ];
+
+
+
+  const labItems = [
+    { path: '/backtest', name: 'Backtest', icon: <FlaskConical size={20} color="#faad14" /> },
+    { path: '/strategy-management', name: 'Strategy Manager', icon: <LayoutList size={20} color="#00d1ff" /> },
+    { path: '/pine-import', name: 'Pine Script Import', icon: <FileCode size={20} color="#a78bfa" /> },
+  ];
+
+  const chartistItems = [
     { path: '/market-analysis', name: 'Market Analysis', icon: <TrendingUp size={20} color="#0ecb81" /> },
-    { path: '/strategy-management', name: 'Strategy Management', icon: <LayoutList size={20} color="#00d1ff" /> },
+    { path: '/indicator-management', name: 'Chart Indicators', icon: <Layers size={20} color="#00d1ff" /> },
   ];
 
   const predictionItems = [
@@ -35,11 +49,10 @@ function Sidebar() {
   ];
 
   const intelligenceItems = [
-    { path: '/sentiment', name: 'Sentiment Analysis', icon: <Brain size={20} color="#a78bfa" /> },
     { path: '/quant-engine', name: 'Quant Engine 🧬', icon: <Zap size={20} color="#a78bfa" /> },
-    { path: '/pine-import', name: 'Pine Import', icon: <FileCode size={20} color="#a78bfa" /> },
-    { path: '/market-features', name: 'Market Features 🧬', icon: <Zap size={20} color="#faad14" /> },
-    { path: '/indicator-management', name: 'Chart Indicators', icon: <Layers size={20} color="#00d1ff" /> },
+    { path: '/sentiment', name: 'Sentiment Analysis', icon: <Brain size={20} color="#a78bfa" /> },
+    { path: '/asset-intelligence', name: 'Asset Intelligence', icon: <Database size={20} color="#ff3366" /> },
+    { path: '/market-features', name: 'Market Features (TQI)', icon: <Zap size={20} color="#faad14" /> },
     { path: '/research', name: 'Research Brain 🧠', icon: <BookOpen size={20} color="#00d1ff" /> },
   ];
 
@@ -47,6 +60,7 @@ function Sidebar() {
     { path: '/strategies', name: 'ภาพรวมระบบ', icon: <Layers size={20} /> },
     { path: '/logs', name: 'บันทึก (Logs)', icon: <Terminal size={20} /> },
     { path: '/telegram-logs', name: 'Telegram Logs', icon: <MessageSquare size={20} color="#0088cc" /> },
+    { path: '/cost-optimization', name: 'Cost Optimization', icon: <DollarSign size={20} color="#faad14" /> },
   ];
 
   return (
@@ -58,16 +72,41 @@ function Sidebar() {
         </Link>
       </div>
       <div className="nav-links">
-        {sectionLabel('── CRYPTO ──')}
-        {cryptoItems.map(item => <NavLink key={item.path} item={item} />)}
+        {sectionLabel('── EXECUTION TEST ──')}
+        {testExecutionItems.map(item => <NavLink key={item.path} item={item} />)}
+
+        {sectionDivider()}
+        {sectionLabel('── EXECUTION LIVE ──')}
+        {liveExecutionItems.map(item => <NavLink key={item.path} item={item} />)}
+
+
+        {sectionDivider()}
+        {sectionLabel('── PRO OPPORTUNITIES ──')}
+        <NavLink item={{ path: '/arbitrage', name: 'Arbitrage Scanner', icon: <Shuffle size={20} color="#0ecb81" /> }} />
+
+        {sectionDivider()}
+        {sectionLabel('── ⚡ SNIPER ZONE (UPDATED) ──')}
+        <NavLink item={{ path: '/dex-sniper', name: 'DEX Sniper (MEME)', icon: <Crosshair size={20} color="#a78bfa" /> }} />
+
+        {sectionDivider()}
+        {sectionLabel('── STRATEGY LAB ──')}
+        {labItems.map(item => <NavLink key={item.path} item={item} />)}
+
+        {sectionDivider()}
+        {sectionLabel('── CHARTIST ──')}
+        {chartistItems.map(item => <NavLink key={item.path} item={item} />)}
+
+        {sectionDivider()}
+        {sectionLabel('── INTELLIGENCE ──')}
+        {intelligenceItems.map(item => <NavLink key={item.path} item={item} />)}
 
         {sectionDivider()}
         {sectionLabel('── PREDICTION ──')}
         {predictionItems.map(item => <NavLink key={item.path} item={item} />)}
 
         {sectionDivider()}
-        {sectionLabel('── INTELLIGENCE ──')}
-        {intelligenceItems.map(item => <NavLink key={item.path} item={item} />)}
+        {sectionLabel('── UPGRADE ──')}
+        <NavLink item={{ path: '/pricing', name: 'Plans & Pricing', icon: <Crown size={20} color="#faad14" /> }} />
 
         {sectionDivider()}
         {sectionLabel('── SYSTEM ──')}
@@ -98,9 +137,11 @@ import Strategies from './pages/Strategies';
 import Logs from './pages/Logs';
 import Backtest from './pages/Backtest';
 import BinanceLive from './pages/BinanceLive';
-import BinanceLiveReal from './pages/BinanceLiveReal';
 import ConfigPage from './pages/Config';
 import Portfolio from './pages/Portfolio';
+// import PortfolioLive from './pages/PortfolioLive'; // No longer needed, unified into Portfolio
+
+
 import TelegramLogs from './pages/TelegramLogs';
 import Sentiment from './pages/Sentiment';
 import Polymarket from './pages/Polymarket';
@@ -113,6 +154,11 @@ import IndicatorManagement from './pages/IndicatorManagement';
 import MarketAnalysis from './pages/MarketAnalysis';
 import MarketFeatures from './pages/MarketFeatures';
 import Research from './pages/Research';
+import Pricing from './pages/Pricing';
+import CostOptimization from './pages/CostOptimization';
+import AssetIntelligence from './pages/AssetIntelligence';
+import DexSniper from './pages/DexSniper';
+import Arbitrage from './pages/Arbitrage';
 
 function App() {
   return (
@@ -122,10 +168,12 @@ function App() {
         <TopHeader />
         <main className="page-content animate-fade-in">
           <Routes>
-            <Route path="/" element={<Portfolio />} />
-            <Route path="/portfolio" element={<Portfolio />} />
-            <Route path="/binance-live" element={<BinanceLive />} />
-            <Route path="/binance-real" element={<BinanceLiveReal />} />
+            <Route path="/" element={<Portfolio mode="test" />} />
+            <Route path="/portfolio" element={<Portfolio mode="test" />} />
+            <Route path="/portfolio-live" element={<Portfolio mode="live" />} />
+
+            <Route path="/binance-test" element={<BinanceLive isRealMode={false} />} />
+            <Route path="/binance-real" element={<BinanceLive isRealMode={true} />} />
             <Route path="/backtest" element={<Backtest />} />
             <Route path="/strategies" element={<Strategies />} />
             <Route path="/logs" element={<Logs />} />
@@ -141,7 +189,12 @@ function App() {
             <Route path="/market-features" element={<MarketFeatures />} />
             <Route path="/indicator-management" element={<IndicatorManagement />} />
             <Route path="/research" element={<Research />} />
+            <Route path="/asset-intelligence" element={<AssetIntelligence />} />
+            <Route path="/pricing" element={<Pricing />} />
+            <Route path="/cost-optimization" element={<CostOptimization />} />
             <Route path="/config" element={<ConfigPage />} />
+            <Route path="/dex-sniper" element={<DexSniper />} />
+            <Route path="/arbitrage" element={<Arbitrage />} />
           </Routes>
         </main>
       </div>

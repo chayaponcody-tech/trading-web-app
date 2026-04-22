@@ -126,3 +126,7 @@ export const formatPrice = (val: number) => {
   if (abs < 100) return val.toFixed(4);
   return val.toFixed(2);
 };
+
+export const normalizeSymbol = (s: string) => 
+  s ? s.replace('/', '').replace(':USDT', '').replace(':USD', '').trim().toUpperCase() : '';
+

@@ -53,4 +53,7 @@ export class BaseExchange {
 
   /** @returns {Promise<Array>} 24h ticker data for all symbols */
   async get24hTickers() { throw new Error('Not implemented'); }
+
+  /** @returns {Promise<Array>} Real trade history from exchange */
+  async getMyTrades(symbol, since, limit) { throw new Error('Not implemented'); }
 }

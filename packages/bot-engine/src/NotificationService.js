@@ -136,7 +136,7 @@ export class NotificationService {
                     interval: '15m',
                     positionSizeUSDT: 100,
                     leverage: 10,
-                    exchange: 'binance_testnet'
+                    exchange: process.env.BINANCE_USE_TESTNET === 'false' ? 'binance_live' : 'binance_testnet'
                 };
                 const id = await this.botManager.startBot(config);
                 await this.send(`✅ *Success:* เปิดบอท \`${symbol}\` ด้วยกลยุทธ์ \`${strategy}\` เรียบร้อยแล้ว (ID: \`${id.slice(-6)}\`)`);

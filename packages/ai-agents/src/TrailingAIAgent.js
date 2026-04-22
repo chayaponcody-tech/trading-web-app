@@ -70,7 +70,7 @@ RESPONSE FORMAT (strict JSON only):
 }`;
 
   try {
-    const raw = await callOpenRouter(prompt, apiKey, model);
+    const raw = await callOpenRouter(prompt, apiKey, model, { feature: 'trailingAI' });
     return {
       action:         raw.action || 'HOLD',
       newTpPercent:   raw.newTpPercent ? parseFloat(raw.newTpPercent) : null,

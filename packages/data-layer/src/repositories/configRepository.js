@@ -21,6 +21,7 @@ export function loadBinanceConfig() {
     // Live (production) Binance credentials — separate from testnet
     liveApiKey: process.env.BINANCE_LIVE_API_KEY || jsonConfig.liveApiKey || '',
     liveApiSecret: process.env.BINANCE_LIVE_API_SECRET || jsonConfig.liveApiSecret || '',
+    virtualTestBalance: parseFloat(process.env.VIRTUAL_TEST_BALANCE || jsonConfig.virtualTestBalance || 1000),
   };
 }
 

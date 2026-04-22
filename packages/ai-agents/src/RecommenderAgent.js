@@ -1,16 +1,14 @@
 import { callOpenRouter } from './OpenRouterClient.js';
 
 // ─── Recommender Agent ────────────────────────────────────────────────────────
-// Handles: AI single-bot recommendation + Fleet proposal
-// Consolidates: aiService.getBotRecommendations() + aiService.getFleetProposal()
-//   + duplicate code in legacy server.js (lines 1564-1983)
+// Optimized for Token Efficiency
 
 const AI_TYPES = {
-  confident:  { desc: 'BEST for 15m Trend following / High Winrate (EMA_RSI)', strategy: 'EMA_RSI', interval: '15m' },
-  scout:      { desc: 'BEST for 5m Scalping (AI_SCOUTER)', strategy: 'AI_SCOUTER', interval: '5m' },
-  aggressive: { desc: 'BEST for 5m Scalping (AI_SCOUTER)', strategy: 'AI_SCOUTER', interval: '5m' }, // Alias for Scout
-  grid:       { desc: 'BEST for 1h Grid Trading boundary mapping (GRID)', strategy: 'AI_GRID', interval: '1h' },
-  safe:       { desc: 'BEST for 1h Grid Trading boundary mapping (GRID)', strategy: 'AI_GRID', interval: '1h' }, // Alias for Grid
+  confident:  { desc: '15m Trend/High Winrate (EMA_RSI)', strategy: 'EMA_RSI', interval: '15m' },
+  scout:      { desc: '5m Scalp (AI_SCOUTER)', strategy: 'AI_SCOUTER', interval: '5m' },
+  aggressive: { desc: '5m Scalp (AI_SCOUTER)', strategy: 'AI_SCOUTER', interval: '5m' },
+  grid:       { desc: '1h Grid Boundary (GRID)', strategy: 'AI_GRID', interval: '1h' },
+  safe:       { desc: '1h Grid Boundary (GRID)', strategy: 'AI_GRID', interval: '1h' },
 };
 
 /**
@@ -18,48 +16,38 @@ const AI_TYPES = {
  */
 export async function recommendBot(closePrices, aiType, apiKey, model, symbol, microstructureData = null) {
   const type = AI_TYPES[aiType] || AI_TYPES.confident;
-  const prompt = `You are a QUANT RISK MANAGER. Analyze ${symbol} data:
-PRICE HISTORY:
-${JSON.stringify(closePrices.slice(-60))}
+  
+  // TOKEN OPTIMIZATION: Use compressed price string
+  const pricesStr = closePrices.slice(-60).map(p => p.toFixed(2)).join(',');
 
-MICROSTRUCTURE:
-${microstructureData ? JSON.stringify(microstructureData) : 'N/A (Standard TA only)'}
+  const prompt = `Quant Analyst Mode: ${symbol}
+PRICES (last 60): ${pricesStr}
+MS: ${microstructureData ? JSON.stringify(microstructureData) : 'N/A'}
 
-TASK: Suggest ONE strategy using the ${type.desc} approach.
+TASK: Suggest strategy using ${type.desc}. 
+RULES:
+1. Funding > 0.01%: Risk-off Longs.
+2. OI Trend: confirm entry.
+3. Leverage: 1-20x based on vol.
+4. Scaling: 2-3 steps (1st is MARKET).
 
-CRITICAL RISK MANAGEMENT:
-1. **FUNDING RATE**: If positive (> 0.01%), reduce leverage or avoid LONG entries (reversal risk). If negative, watch for short-squeeze opportunities.
-2. **OI TREND**: Confirm entry with OI. If price is near TA support but OI is dropping, the support may break.
-3. **LEVERAGE**: Suggest a safe leverage (1-20x). Reduce leverage if Funding is high or volatility is spiked.
-4. **SCALING IN (ซอยไม้)**: Suggest 2-3 entry steps.
-   - First step is always MARKET.
-   - Other steps are LIMIT orders at a specific percentage offset from current price.
-   - Assign a weight (percentage of capital) to each step.
-
-RESPONSE FORMAT (strict JSON only):
+RESPONSE (JSON):
 {
   "symbol": "${symbol}",
   "strategy": "${type.strategy}",
   "interval": "${type.interval}",
-  "tp": 1.5,
-  "sl": 1.0,
-  "leverage": 10,
-  "entry_reason": "เหตุผลเชิงลึก (ภาษาไทย) โดยระบุปัจจัยทางเทคนิค + Microstructure (Funding/OI) ถ้ามี",
-  "entry_steps": [
-    { "type": "MARKET", "weightPct": 50, "offsetPct": 0 },
-    { "type": "LIMIT", "weightPct": 50, "offsetPct": -0.5 }
-  ],
-  "reason": "สรุปสั้นๆ สำหรับระบบแจ้งเตือน (Thai)",
-  "grid_upper": null,
-  "grid_lower": null
-}
-Ensure entry_steps weightPct total = 100. OffsetPct for Longs is negative, Shorts is positive.`;
+  "tp": 1.5, "sl": 1.0, "leverage": 10,
+  "entry_reason": "Thai analytical reasoning (concise)",
+  "entry_steps": [{ "type": "MARKET", "weightPct": 50, "offsetPct": 0 }, { "type": "LIMIT", "weightPct": 50, "offsetPct": -0.5 }],
+  "reason": "Thai short summary",
+  "grid_upper": null, "grid_lower": null
+}`;
 
-  const raw = await callOpenRouter(prompt, apiKey, model);
+  const raw = await callOpenRouter(prompt, apiKey, model, { feature: 'recommendBot' });
   return {
     symbol:               raw.symbol || symbol,
-    strategy:             type.strategy,   // force — AI must not override requested strategy
-    interval:             type.interval,   // force — AI must not override requested interval
+    strategy:             type.strategy,
+    interval:             type.interval,
     tp:                   parseFloat(raw.tp) || 1.5,
     sl:                   parseFloat(raw.sl) || 1.0,
     leverage:             parseInt(raw.leverage) || 5,
@@ -79,29 +67,69 @@ Ensure entry_steps weightPct total = 100. OffsetPct for Longs is negative, Short
  * Get AI-proposed fleet of bots.
  */
 export async function proposeFleet(tickers, count, capital, durationMins, instructions, apiKey, model) {
-  const prompt = `You are an EXPERT CRYPTO QUANT. Plan a FLEET of exactly ${count} bot(s).
-Capital: $${capital} USDT | Duration: ${durationMins} mins
-Goal: "${instructions}"
+  // TOKEN OPTIMIZATION: Compact Tickers (Symbol, PriceChange, Volume)
+  const compactTickers = tickers.slice(0, 30)
+    .map(t => `${t.symbol}:${parseFloat(t.priceChangePercent).toFixed(1)}%|Vol:${Math.round(t.quoteVolume/1000)}k`)
+    .join('\n');
 
-Top Selection List (24h stats):
-${JSON.stringify(tickers.slice(0, 30))}
+  const prompt = `Fleet Planner Mode. Bots: ${count}, Cap: $${capital}, Goal: "${instructions}"
+Top Market List (24h):
+${compactTickers}
 
-STRATEGIES: EMA_RSI (15m trend), AI_SCOUTER (5m scalp), AI_GRID (range — MUST include grid_upper, grid_lower numbers).
+STRATEGY: EMA_RSI (15m), AI_SCOUTER (5m), AI_GRID (1h range).
 
-RESPONSE FORMAT (strict valid JSON):
+RESPONSE (JSON):
 {
-  "confident": {
-    "name": "🛡️ Confident Fleet",
-    "description": "อธิบายเชิงกลยุทธ์ภาพรวม (ภาษาไทย)",
-    "coins": [{ "symbol": "BTCUSDT", "strategy": "EMA_RSI", "interval": "15m", "tp": 2.0, "sl": 1.0, "leverage": 10, "reason": "อธิบายเหตุผลทางเทคนิครายตัว (ภาษาไทย)" }]
+  "confident": { "name": "🛡️ Confident Fleet", "description": "Thai", "coins": [{ "symbol": "BTCUSDT", "strategy": "EMA_RSI", "interval": "15m", "tp": 2.0, "sl": 1.0, "leverage": 10, "reason": "Thai" }] },
+  "scout": { "name": "🏹 Scouting Fleet", "description": "Thai", "coins": [{ "symbol": "DOGEUSDT", "strategy": "AI_SCOUTER", "interval": "5m", "tp": 1.5, "sl": 0.5, "leverage": 20, "reason": "Thai" }] }
+}
+Rules: "coins" array size = ${count}. Short Thai reasons.`;
+
+  return callOpenRouter(prompt, apiKey, model, { feature: 'proposeFleet' });
+}
+
+
+/**
+ * Master Strategy Wizard: AI proposes 3 distinct options (Safe, Balanced, Aggressive).
+ */
+export async function proposeFundStrategy(totalAmount, tickers, apiKey, model) {
+  const compactTickers = (tickers || []).slice(0, 30)
+    .map(t => {
+      const pct = t.percentage !== undefined ? t.percentage : (t.priceChangePercent || 0);
+      const vol = t.quoteVolume || t.baseVolume || 0;
+      return `${t.symbol}:${parseFloat(pct).toFixed(1)}%|Vol:${Math.round(vol/1000)}k`;
+    })
+    .join('\n');
+
+  const prompt = `AI CIO Mode. Total Capital: $${totalAmount}
+Recent Market Data (Top 30 by Volume):
+${compactTickers}
+
+TASK: Propose 3 distinct fund allocation strategies based on risk levels.
+
+RESPONSE (JSON ONLY):
+{
+  "safe": {
+    "summary": "Thai summary for safe mode",
+    "fleets": [{ "name": "e.g. Fortress", "budget": number, "strategyType": "trend|grid", "riskMode": "safe", "isAutonomous": true, "reason": "Thai" }],
+    "reserve": number
   },
-  "scout": {
-    "name": "🏹 Scouting Fleet",
-    "description": "อธิบายเชิงกลยุทธ์ภาพรวม (ภาษาไทย)",
-    "coins": [{ "symbol": "DOGEUSDT", "strategy": "AI_SCOUTER", "interval": "5m", "tp": 1.5, "sl": 0.5, "leverage": 20, "reason": "อธิบายเหตุผลทางเทคนิครายตัว (ภาษาไทย)" }]
+  "balanced": {
+    "summary": "Thai summary for balanced mode",
+    "fleets": [...],
+    "reserve": number
+  },
+  "aggressive": {
+    "summary": "Thai summary for aggressive mode",
+    "fleets": [{ "name": "e.g. Rapid Scout", "budget": number, "strategyType": "scalp", "riskMode": "aggressive", "isAutonomous": true, "reason": "Thai" }],
+    "reserve": number
   }
 }
-Rules: "coins" arrays MUST have exactly ${count} objects. Each coin MUST have a specific "reason" why it was chosen. NO MARKDOWN.`;
+Rules:
+1. "reserve" is cash for drawdowns (10-40%). Sum(budget) + reserve = ${totalAmount}.
+2. Max 3 fleets per tier.
+3. Use Professional Thai language.
+4. Strategy Types: 'trend' (EMA/SATS), 'scalp' (EMA_SCALP), 'grid' (AI_GRID).`;
 
-  return callOpenRouter(prompt, apiKey, model);
+  return callOpenRouter(prompt, apiKey, model, { feature: 'proposeFundStrategy', jsonMode: true });
 }

@@ -53,11 +53,13 @@ class AlphaAgent:
         sandbox: SandboxExecutor,
         strategy_ai_url: str,
         db: sqlite3.Connection,
+        log_callback: Any = None,
     ) -> None:
         self.llm_client = llm_client
         self.sandbox = sandbox
         self.strategy_ai_url = strategy_ai_url.rstrip("/")
         self.db = db
+        self.log_callback = log_callback
 
     # ─── Public API ───────────────────────────────────────────────────────────
 
@@ -98,12 +100,16 @@ class AlphaAgent:
             validation = self._validate_code(code)
             if not validation.valid:
                 last_error = validation.error or "Validation failed"
+                if self.log_callback:
+                    self.log_callback(f"AlphaAgent: Validation failed on attempt {attempt}: {last_error}", "WARNING")
                 continue
 
             # 2. Sandbox execution
             sandbox_result = self.sandbox.execute(code)
             if not sandbox_result.success:
                 last_error = sandbox_result.error or "Sandbox execution failed"
+                if self.log_callback:
+                    self.log_callback(f"AlphaAgent: Sandbox error on attempt {attempt}: {last_error}", "WARNING")
                 continue
 
             # 3. Register strategy
@@ -247,11 +253,12 @@ class AlphaAgent:
             f"Context:\n{context_str}\n\n"
             f"Requirements:\n"
             f"1. The class MUST extend BaseStrategy (already imported in scope).\n"
-            f"2. Use only these imports: numpy, pandas, vectorbt, math, statistics, "
-            f"collections, itertools.\n"
-            f"3. Implement at minimum: __init__(self, params: dict) and "
-            f"generate_signals(self, ohlcv: pd.DataFrame) -> pd.Series.\n"
-            f"4. Return ONLY the Python code block, no explanations.\n\n"
+            f"2. Use only these libraries: numpy, pandas, pandas_ta, math, vbt.\n"
+            f"3. Implement abstract methods: \n"
+            f"   - populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame\n"
+            f"   - populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame (must add a 'signal' column with 'LONG', 'SHORT', or 'NONE')\n"
+            f"4. You can also define an '__init__' if you need to store state.\n"
+            f"5. Return ONLY the Python code block, no explanations.\n\n"
             f"```python\n"
             f"# Your strategy code here\n"
             f"```"
@@ -271,9 +278,11 @@ class AlphaAgent:
             f"Requirements:\n"
             f"1. The mutated class MUST extend BaseStrategy.\n"
             f"2. Change at least ONE parameter or logic component from the original.\n"
-            f"3. Use only these imports: numpy, pandas, vectorbt, math, statistics, "
-            f"collections, itertools.\n"
-            f"4. Return ONLY the Python code block, no explanations.\n\n"
+            f"3. Implement abstract methods: \n"
+            f"   - populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame\n"
+            f"   - populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame (must add a 'signal' column with 'LONG', 'SHORT', or 'NONE')\n"
+            f"4. Use only these libraries: numpy, pandas, pandas_ta, math, vbt.\n"
+            f"5. Return ONLY the Python code block, no explanations.\n\n"
             f"```python\n"
             f"# Your mutated strategy code here\n"
             f"```"
@@ -288,9 +297,11 @@ class AlphaAgent:
             f"Failing Code:\n```python\n{code}\n```\n\n"
             f"Requirements:\n"
             f"1. The class MUST extend BaseStrategy.\n"
-            f"2. Use only these imports: numpy, pandas, vectorbt, math, statistics, "
-            f"collections, itertools.\n"
-            f"3. Return ONLY the corrected Python code block, no explanations.\n\n"
+            f"2. Use only these libraries: numpy, pandas, pandas_ta, math, vbt.\n"
+            f"3. Implement abstract methods: \n"
+            f"   - populate_indicators(self, df: pd.DataFrame, params: dict) -> pd.DataFrame\n"
+            f"   - populate_signals(self, df: pd.DataFrame, params: dict) -> pd.DataFrame (must add a 'signal' column with 'LONG', 'SHORT', or 'NONE')\n"
+            f"4. Return ONLY the corrected Python code block, no explanations.\n\n"
             f"```python\n"
             f"# Your corrected strategy code here\n"
             f"```"

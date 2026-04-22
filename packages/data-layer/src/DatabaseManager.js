@@ -54,6 +54,7 @@ export function initDb() {
         reason TEXT,
         strategy TEXT, 
         entryReason TEXT, 
+        aiLesson TEXT,
         recordedAt DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE IF NOT EXISTS ai_memory (
@@ -66,7 +67,8 @@ export function initDb() {
         entryPrice REAL, 
         exitPrice REAL, 
         exitTime TEXT, 
-        recordedAt TEXT
+        recordedAt TEXT,
+        aiLesson TEXT
       );
       CREATE TABLE IF NOT EXISTS bot_tuning_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,6 +105,7 @@ export function initDb() {
         name TEXT,
         config TEXT,
         isRunning INTEGER DEFAULT 0,
+        vaultBalance REAL DEFAULT 0,
         createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE IF NOT EXISTS fleet_logs (
@@ -110,6 +113,19 @@ export function initDb() {
         fleetId TEXT,
         message TEXT,
         type TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS indicator_configs (
+        id TEXT PRIMARY KEY,
+        config_json TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ai_token_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        feature TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INTEGER NOT NULL,
+        completion_tokens INTEGER NOT NULL,
+        total_tokens INTEGER NOT NULL,
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -122,15 +138,59 @@ export function initDb() {
       console.log('✅ SQLite: Migrated bots table — added expiresAt');
     }
 
-    // Migrate trades table — add entryTime if missing
+    // Migrate fleets table
+    const fleetColumns = db.prepare('PRAGMA table_info(fleets)').all();
+    if (!fleetColumns.some(c => c.name === 'vaultBalance')) {
+      db.exec('ALTER TABLE fleets ADD COLUMN vaultBalance REAL DEFAULT 0');
+      console.log('✅ SQLite: Migrated fleets table — added vaultBalance');
+    }
+
+    // Migrate trades table
     const tradeColumns = db.prepare('PRAGMA table_info(trades)').all();
     if (!tradeColumns.some(c => c.name === 'entryTime')) {
       db.exec('ALTER TABLE trades ADD COLUMN entryTime TEXT');
       console.log('✅ SQLite: Migrated trades table — added entryTime');
     }
+    if (!tradeColumns.some(c => c.name === 'fleetId')) {
+      db.exec('ALTER TABLE trades ADD COLUMN fleetId TEXT');
+      console.log('✅ SQLite: Migrated trades table — added fleetId');
+    }
+    if (!tradeColumns.some(c => c.name === 'aiLesson')) {
+      db.exec('ALTER TABLE trades ADD COLUMN aiLesson TEXT');
+      console.log('✅ SQLite: Migrated trades table — added aiLesson');
+      
+      // Perform Backfill: Sync old lessons from ai_memory to trades
+      try {
+        const result = db.prepare(`
+          UPDATE trades 
+          SET aiLesson = (
+            SELECT aiLesson FROM ai_memory 
+            WHERE ai_memory.symbol = trades.symbol AND ai_memory.exitTime = trades.exitTime
+            LIMIT 1
+          )
+          WHERE aiLesson IS NULL
+        `).run();
+        if (result.changes > 0) {
+          console.log(`🧠 SQLite: Backfilled ${result.changes} AI Lessons into Close History.`);
+        }
+      } catch (e) {
+        console.warn('⚠️ SQLite: Backfill skip —', e.message);
+      }
+    }
+
+    // Migrate ai_memory table
+    const aiMemoryColumns = db.prepare('PRAGMA table_info(ai_memory)').all();
+    if (aiMemoryColumns.length > 0 && !aiMemoryColumns.some(c => c.name === 'aiLesson')) {
+      db.exec('ALTER TABLE ai_memory ADD COLUMN aiLesson TEXT');
+      console.log('✅ SQLite: Migrated ai_memory table — added aiLesson');
+    }
 
     // Migrate — add backtest tables if missing
-    const backtestResultsColumns = db.prepare('PRAGMA table_info(backtest_results)').all();
+    let backtestResultsColumns = [];
+    try {
+      backtestResultsColumns = db.prepare('PRAGMA table_info(backtest_results)').all();
+    } catch {}
+    
     if (backtestResultsColumns.length === 0) {
       db.exec(`
         CREATE TABLE IF NOT EXISTS backtest_results (
@@ -247,6 +307,18 @@ export function initDb() {
         CREATE INDEX IF NOT EXISTS idx_mutation_history_lineage ON mutation_history(lineage_id);
       `);
       console.log('✅ SQLite: Migrated — added mutation_history table');
+    }
+
+    const globalAiReportsColumns = db.prepare('PRAGMA table_info(global_ai_reports)').all();
+    if (globalAiReportsColumns.length === 0) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS global_ai_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          report_md TEXT NOT NULL,
+          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      console.log('✅ SQLite: Migrated — added global_ai_reports table');
     }
 
     // Migrate — add strategy management tables if missing (Req 1.1, 6.2)

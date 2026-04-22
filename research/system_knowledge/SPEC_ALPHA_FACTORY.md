@@ -8,8 +8,11 @@
 **Objective**: ค้นหาไอเดียและเทคนิคจากภายนอกมาสรุปเป็นองค์ความรู้
 
 ### 🧰 เครื่องมือ & เทคโนโลยี:
-- **Search Engine**: Perplexity API หรือ Tavily API (ออกแบบมาเพื่อ AI Search โดยเฉพาะ)
-- **Sources**: Twitter/X (ผ่านหน่วยค้นหา), Financial News, Quantitative Finance Papers (Arxiv), TradingView Scripts.
+- **Sources**: 
+    - **Web Research (Tavily/Perplexity)**: เจาะลึก Medium, Substack และ Blog โพสต์สาย Quant เพื่อตามติดเทรนด์ตลาดล่าสุด
+    - **Social Media (X/Reddit)**: ติดตาม Alpha จากเหล่า Quants และ Pine Script Developers ใน Crypto Twitter (CT)
+    - **Academic Papers (ArXiv/SSRN)**: ค้นหาความได้เปรียบทางสถิติ (Statistical Edge) จากงานวิจัยระดับสถาบัน
+    - **GitHub Repositories**: ตรวจสอบ Library และโมเดลวิเคราะห์ข้อมูล Market Microstructure ใหม่ๆ
 - **Workflow**:
     1.  ตั้งเวลา (Schedule) รันวันละ 1-2 ครั้ง
     2.  AI ค้นหาคำสำคัญเช่น "crypto trading alpha", "vectorbt strategy", "price microstructure ideas"
@@ -58,9 +61,10 @@
 ---
 
 ## 📅 แผนการพัฒนาระยะสั้น (Next Actions):
-1.  **[ ]** สร้าง `strategy_base.py` สำหรับเป็นแม่แบบให้ AI
-2.  **[ ]** พัฒนา `AlphaAgent` ในฝั่ง Python เพื่อรับ Prompt และคืนค่าเป็นโค้ด
-3.  **[ ]** สร้าง UI หน้า `/quant-engine/proposals` ใหม่
+1.  **[x]** พัฒนา `ScoutAgent` Prototype สำหรับดึงไอเดียเบื้องต้น
+2.  **[x]** พัฒนา `AlphaAgent` ในฝั่ง Python เพื่อรับ Prompt และคืนค่าเป็นโค้ด (พร้อมระบบ Self-Correction)
+3.  **[ ]** สร้าง UI หน้า `/quant-engine` ให้รองรับการดู Agent Logs และ Scout Reports
+4.  **[ ]** พัฒนา Alpha Review Dashboard สำหรับอนุมัติกลยุทธ์เข้าสู่ Paper Trading
 
 ---
 **ผู้อนุมัติ (Admin)**: ___________________ (ลงชื่อเมื่อพร้อมเริ่ม Phase 1)

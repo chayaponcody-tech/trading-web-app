@@ -36,7 +36,7 @@ RESPONSE FORMAT (JSON only):
 }`;
 
   try {
-    const raw = await callOpenRouter(prompt, apiKey, model);
+    const raw = await callOpenRouter(prompt, apiKey, model, { feature: 'reflect' });
     return { approved: Boolean(raw.approved), reason: raw.reason || 'No reason' };
   } catch (e) {
     console.error('[ReflectionAgent] Error:', e.message);

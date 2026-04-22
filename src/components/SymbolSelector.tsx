@@ -7,10 +7,7 @@ interface SymbolSelectorProps {
   searchTop?: boolean;
 }
 
-const POPULAR = [
-  'BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT',
-  'PAXGUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'MATICUSDT',
-];
+const POPULAR = ['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'PAXGUSDT'];
 
 const LABEL = (s: string) => {
   if (s === 'PAXGUSDT') return 'GOLD'; // Shorter label for narrow view

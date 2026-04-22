@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AI_MODELS } from '../constants/aiModels';
-import { Settings, Shield, Cpu, Key, Brain, TrendingUp, Activity, Zap, RefreshCw } from 'lucide-react';
+import { Settings, Shield, Cpu, Key, Brain, TrendingUp, Activity, Zap, RefreshCw, Globe } from 'lucide-react';
 
 const API = '';
 const POLY_API = 'http://localhost:8080';
@@ -19,7 +19,8 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 const inputStyle = { width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border-color)', color: '#fff', borderRadius: '4px' };
 const selectStyle = { ...inputStyle, background: 'rgba(0,0,0,0.3)' };
 export default function ConfigPage() {
-  const [tab, setTab] = useState<'crypto' | 'polymarket' | 'quant'>('crypto');
+  const [view, setView] = useState<'customer' | 'admin'>('customer');
+  const [activeTab, setActiveTab] = useState('crypto'); // Secondary tabs inside views
 
   // ── Quant Engine state ────────────────────────────────────────────────────
   const [quantCfg, setQuantCfg] = useState({
@@ -131,19 +132,26 @@ export default function ConfigPage() {
     setPinging(false);
   };
 
-  useEffect(() => {
-    fetchCryptoCfg();
-    pingStrategyAi();
-    fetchQuantCfg();
-    fetch('/api/config/my-ip').then(r => r.json()).then(d => setMyIp(d.ip)).catch(() => {});
-    fetch(`${POLY_API}/api/config`)
-      .then(r => { setPolyOnline(r.ok); return r.json(); })
-      .then(d => setPolyCfg({ ai_model: d.ai_model ?? '', confidence_threshold: d.confidence_threshold ?? 0.72, max_bet: d.max_bet ?? 3.0, use_rag_context: d.use_rag_context !== 0 }))
-      .catch(() => setPolyOnline(false));
-    // Fetch current log level
-    fetch('/api/config/strategy-ai/log-level')
-      .then(r => r.json()).then(d => { if (d.level) setLogLevel(d.level); }).catch(() => {});
-  }, []);
+    useEffect(() => {
+      fetchCryptoCfg();
+      pingStrategyAi();
+      fetch('/api/config/my-ip').then(r => r.json()).then(d => setMyIp(d.ip)).catch(() => {});
+      
+      // Fetch current log level
+      fetch('/api/config/strategy-ai/log-level')
+        .then(r => r.json()).then(d => { if (d.level) setLogLevel(d.level); }).catch(() => {});
+    }, []);
+
+    // Fetch tab-specific configs only when activeTab or view changes
+    useEffect(() => {
+      if (view === 'admin') {
+        fetchQuantCfg();
+        fetch(`${POLY_API}/api/config`)
+          .then(r => { setPolyOnline(r.ok); return r.json(); })
+          .then(d => setPolyCfg(prev => ({ ...prev, ai_model: d.ai_model ?? '', confidence_threshold: d.confidence_threshold ?? 0.72, max_bet: d.max_bet ?? 3.0, use_rag_context: d.use_rag_context !== 0 })))
+          .catch(() => setPolyOnline(false));
+      }
+    }, [view, activeTab]);
 
   const handleSaveCrypto = async () => {
     setSaving(true);
@@ -197,35 +205,50 @@ export default function ConfigPage() {
   };
 
   return (
-    <div className="animate-fade-in" style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', margin: 0 }}>
-          <Settings size={32} color="#faad14" /> Global System Configuration
-        </h1>
-        <p style={{ color: '#888', marginTop: '0.5rem' }}>Manage API connections and AI model preferences for the entire platform.</p>
+    <div className="animate-fade-in" style={{ padding: '1rem 2rem 3rem', maxWidth: '1200px', margin: '0 auto' }}>
+      
+      {/* View Switcher */}
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '2.5rem' }}>
+        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '4px', borderRadius: '12px', display: 'flex', gap: '4px', border: '1px solid var(--border-color)' }}>
+          <button 
+            onClick={() => setView('customer')}
+            style={{
+              padding: '0.75rem 2rem', borderRadius: '8px', border: 'none', cursor: 'pointer',
+              background: view === 'customer' ? 'var(--profit-color)' : 'transparent',
+              color: view === 'customer' ? '#000' : '#888',
+              fontWeight: 700, fontSize: '0.95rem', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '0.5rem'
+            }}
+          >
+            <Shield size={18} /> My Account
+          </button>
+          <button 
+            onClick={() => setView('admin')}
+            style={{
+              padding: '0.75rem 2rem', borderRadius: '8px', border: 'none', cursor: 'pointer',
+              background: view === 'admin' ? '#a78bfa' : 'transparent',
+              color: view === 'admin' ? '#000' : '#888',
+              fontWeight: 700, fontSize: '0.95rem', transition: 'all 0.2s', display: 'flex', alignItems: 'center', gap: '0.5rem'
+            }}
+          >
+            <Settings size={18} /> Platform Backoffice
+          </button>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', padding: '4px', width: 'fit-content', marginBottom: '2rem' }}>
-        {([['crypto', '🟡 Crypto / Binance'], ['polymarket', '🟠 Polymarket'], ['quant', '🧬 Quant Engine']] as const).map(([t, label]) => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            padding: '0.5rem 1.5rem', borderRadius: '6px', border: 'none', cursor: 'pointer', fontSize: '0.9rem', fontWeight: 500,
-            background: tab === t ? (t === 'crypto' ? 'rgba(250,173,20,0.2)' : t === 'polymarket' ? 'rgba(255,107,53,0.2)' : 'rgba(163,139,250,0.2)') : 'transparent',
-            color: tab === t ? (t === 'crypto' ? '#faad14' : t === 'polymarket' ? '#ff6b35' : '#a78bfa') : '#666',
-            transition: 'all 0.15s',
-          }}>{label}</button>
-        ))}
-      </div>
-
-      {/* CRYPTO TAB */}
-      {tab === 'crypto' && (
+      {/* CUSTOMER VIEW */}
+      {view === 'customer' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          <div style={{ marginBottom: '1rem' }}>
+            <h1 style={{ margin: 0, fontSize: '1.75rem' }}>Personal Credentials</h1>
+            <p style={{ color: '#888', marginTop: '0.5rem' }}>Manage your private API keys and notification preferences.</p>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
 
+            {/* Binance Testnet */}
             <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #faad14' }}>
               <h2 style={{ color: '#faad14', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Key size={24} /> Binance Testnet API
+                <Key size={24} /> Binance Testnet
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
                 <Field label="API Key">
@@ -236,22 +259,41 @@ export default function ConfigPage() {
                   <input type="password" style={inputStyle} value={cfg.apiSecret} onChange={e => setCfg(k => ({ ...k, apiSecret: e.target.value }))}
                     placeholder={cfg.hasKeys ? '✓ Secret Key Saved' : 'Paste your Binance Secret Key'} />
                 </Field>
-                <div style={{ padding: '0.75rem 1rem', background: 'rgba(250,173,20,0.05)', borderRadius: '4px', border: '1px solid rgba(250,173,20,0.1)', fontSize: '0.8rem', color: '#ccc' }}>
-                  <Shield size={14} style={{ verticalAlign: 'middle', marginRight: '0.5rem' }} color="#faad14" />
-                  Stored securely in <code>binance-config.json</code>
-                </div>
               </div>
             </div>
 
+            {/* Binance Live */}
             <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #f6465d' }}>
               <h2 style={{ color: '#f6465d', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Key size={24} color="#f6465d" /> Binance Live API (เงินจริง)
+                <Key size={24} color="#f6465d" /> Binance Real Account
               </h2>
-              <p style={{ color: '#888', fontSize: '0.8rem', margin: '0 0 1rem 0' }}>ใช้สำหรับหน้า Binance (Live) เท่านั้น</p>
-              <div style={{ padding: '0.6rem 0.75rem', background: 'rgba(246,70,93,0.08)', border: '1px solid rgba(246,70,93,0.3)', borderRadius: '6px', fontSize: '0.78rem', color: '#f6465d', marginBottom: '1.2rem' }}>
-                API Key นี้จะส่ง order จริงด้วยเงินจริง
-              </div>
+              <p style={{ color: '#888', fontSize: '0.8rem', margin: '0 0 1rem 0' }}>Used for actual live trading execution.</p>
+              
+              {/* 🌐 Whitelist IP Info */}
+              {myIp && (
+                <div style={{ background: 'rgba(52, 199, 89, 0.05)', borderRadius: '8px', padding: '1rem', border: '1px solid rgba(52, 199, 89, 0.15)', marginBottom: '1.2rem' }}>
+                  <div style={{ fontSize: '0.7rem', color: '#34c759', fontWeight: 800, marginBottom: '0.4rem', textTransform: 'uppercase' }}>🔒 Whitelist Recommended</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontFamily: 'monospace', fontWeight: 'bold', color: '#fff', fontSize: '1.1rem' }}>{myIp}</div>
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(myIp);
+                        setIpCopied(true);
+                        setTimeout(() => setIpCopied(false), 2000);
+                      }}
+                      style={{ background: 'none', border: '1px solid rgba(255,255,255,0.1)', color: ipCopied ? '#34c759' : '#888', fontSize: '0.7rem', padding: '0.25rem 0.5rem', borderRadius: '4px', cursor: 'pointer' }}
+                    >
+                      {ipCopied ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: '#666', marginTop: '0.6rem' }}>
+                    ให้นำ IP นี้ไปใส่ในช่อง <b>"Allow access to any IP (Restricted)"</b> ในหน้า API Whitelist ของ Binance
+                  </div>
+                </div>
+              )}
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+
                 <Field label="Live API Key">
                   <input type="text" style={inputStyle} value={cfg.liveApiKey} onChange={e => setCfg(k => ({ ...k, liveApiKey: e.target.value }))}
                     placeholder={cfg.hasLiveKeys ? '✓ Live API Key Saved' : 'Paste Live API Key'} />
@@ -260,52 +302,13 @@ export default function ConfigPage() {
                   <input type="password" style={inputStyle} value={cfg.liveApiSecret} onChange={e => setCfg(k => ({ ...k, liveApiSecret: e.target.value }))}
                     placeholder={cfg.hasLiveKeys ? '✓ Live Secret Saved' : 'Paste Live Secret Key'} />
                 </Field>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: cfg.hasLiveKeys ? '#0ecb81' : '#888', fontSize: '0.85rem' }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: cfg.hasLiveKeys ? '#0ecb81' : '#555' }} />
-                  {cfg.hasLiveKeys ? 'Live Keys Configured' : 'ยังไม่ได้ตั้งค่า'}
-                </div>
-                {myIp && (
-                  <div style={{ padding: '0.75rem 1rem', background: 'rgba(0,0,0,0.3)', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.08)' }}>
-                    <div style={{ fontSize: '0.7rem', color: '#666', marginBottom: '0.4rem' }}>Server Public IP</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <code style={{ fontSize: '1rem', fontWeight: 'bold', color: '#faad14' }}>{myIp}</code>
-                      <button onClick={() => { navigator.clipboard.writeText(myIp); setIpCopied(true); setTimeout(() => setIpCopied(false), 2000); }}
-                        style={{ padding: '0.3rem 0.75rem', background: ipCopied ? '#0ecb8122' : 'rgba(255,255,255,0.06)', border: `1px solid ${ipCopied ? '#0ecb81' : 'rgba(255,255,255,0.15)'}`, color: ipCopied ? '#0ecb81' : '#ccc', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem' }}>
-                        {ipCopied ? 'Copied!' : 'Copy'}
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
 
-            <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #faad14' }}>
-              <h2 style={{ color: '#faad14', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Cpu size={24} /> AI Strategy Settings
-              </h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-                <Field label="OpenRouter API Key">
-                  <input type="password" style={inputStyle} value={tempORKey} onChange={e => setTempORKey(e.target.value)}
-                    placeholder={cfg.hasOpenRouter ? '✓ Key Saved (Encrypted)' : 'sk-or-v1-...'} />
-                </Field>
-                <Field label="Preferred AI Model">
-                  <select style={selectStyle} value={cfg.openRouterModel} onChange={e => setCfg(k => ({ ...k, openRouterModel: e.target.value }))}>
-                    <option value="">Default Model</option>
-                    {AI_MODELS.map(m => (
-                      <option key={m.value} value={m.value}>{m.label}</option>
-                    ))}
-                  </select>
-                </Field>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: cfg.hasOpenRouter ? '#0ecb81' : '#f6465d', fontSize: '0.85rem' }}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: cfg.hasOpenRouter ? '#0ecb81' : '#f6465d' }} />
-                  {cfg.hasOpenRouter ? 'AI Engine Ready' : 'AI Key Missing'}
-                </div>
-              </div>
-            </div>
-
+            {/* Telegram */}
             <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #0088cc' }}>
               <h2 style={{ color: '#0088cc', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Shield size={24} color="#0088cc" /> Telegram Notifications
+                <Shield size={24} color="#0088cc" /> Telegram Alerts
               </h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
                 <Field label="Bot Token" hint="Create via @BotFather">
@@ -316,289 +319,185 @@ export default function ConfigPage() {
                   <input type="text" style={inputStyle} value={cfg.telegramChatId} onChange={e => setCfg(k => ({ ...k, telegramChatId: e.target.value }))}
                     placeholder="e.g. 123456789" />
                 </Field>
-                {cfg.hasTelegram && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#0ecb81', fontSize: '0.85rem' }}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#0ecb81' }} /> Telegram Active
-                  </div>
+              </div>
+            </div>
+
+            {/* AI Model Preference */}
+            <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #a78bfa' }}>
+              <h2 style={{ color: '#a78bfa', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Brain size={24} /> AI Engine Preferences
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                <Field label="OpenRouter API Key (sk-or-...)">
+                  <input type="password" style={inputStyle} value={tempORKey} onChange={e => setTempORKey(e.target.value)}
+                    placeholder={cfg.hasOpenRouter ? '✓ Key Saved' : 'sk-or-v1-...'} />
+                </Field>
+                <Field label="Preferred LLM Model">
+                  <select style={selectStyle} value={cfg.openRouterModel} onChange={e => setCfg(k => ({ ...k, openRouterModel: e.target.value }))}>
+                    {AI_MODELS.map(m => (
+                      <option key={m.value} value={m.value}>{m.label}</option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </div>
+
+            {/* Polymarket Personal Limits */}
+            <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #ff6b35' }}>
+              <h2 style={{ color: '#ff6b35', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <TrendingUp size={24} color="#ff6b35" /> Polymarket Risk Limits
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                <Field label={`Prediction Confidence — ${(polyCfg.confidence_threshold * 100).toFixed(0)}%`}>
+                  <input type="range" min={0.5} max={0.95} step={0.01} style={{ width: '100%' }}
+                    value={polyCfg.confidence_threshold} onChange={e => setPolyCfg(p => ({ ...p, confidence_threshold: parseFloat(e.target.value) }))} />
+                </Field>
+                <Field label="Max Bet per Prediction (USDC)">
+                  <input type="number" style={inputStyle} value={polyCfg.max_bet} onChange={e => setPolyCfg(p => ({ ...p, max_bet: parseFloat(e.target.value) }))} />
+                </Field>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
+                  <button onClick={() => setPolyCfg(p => ({ ...p, use_rag_context: !p.use_rag_context }))}
+                    style={{
+                      padding: '0.5rem 1rem', borderRadius: '6px', border: '1px solid var(--border-color)',
+                      background: polyCfg.use_rag_context ? '#ff6b3522' : 'transparent',
+                      color: polyCfg.use_rag_context ? '#ff6b35' : '#666',
+                      cursor: 'pointer', fontSize: '0.85rem'
+                    }}>
+                    {polyCfg.use_rag_context ? 'RAG Learning Enabled' : 'RAG Learning Disabled'}
+                  </button>
+                  <button onClick={handleSavePoly} disabled={polySaving}
+                    style={{ marginLeft: 'auto', padding: '0.5rem 1rem', background: '#ff6b35', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem' }}>
+                    {polySaving ? '...' : 'Save Risk'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem' }}>
+            <button onClick={handleSaveCrypto} disabled={saving}
+              style={{ padding: '1rem 3rem', background: 'var(--profit-color)', color: '#000', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem', opacity: saving ? 0.7 : 1 }}>
+              {saving ? 'Updating Account...' : 'Save Account Settings'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN VIEW */}
+      {view === 'admin' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+          <div style={{ marginBottom: '1rem' }}>
+            <h1 style={{ margin: 0, fontSize: '1.75rem', color: '#a78bfa' }}>System Infrastructure</h1>
+            <p style={{ color: '#888', marginTop: '0.5rem' }}>Global configuration for the quant engine and platform intelligence.</p>
+          </div>
+
+          {/* Service URLs Panel */}
+          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #a78bfa' }}>
+            <h2 style={{ color: '#a78bfa', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Cpu size={24} /> Microservice Architecture
+              </span>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                {quantOnline !== null && (
+                  <span style={{ fontSize: '0.8rem', color: quantOnline ? '#0ecb81' : '#f6465d' }}>
+                    Quant: {quantOnline ? '● Online' : '● Offline'}
+                  </span>
+                )}
+                {strategyAiStatus.online !== null && (
+                  <span style={{ fontSize: '0.8rem', color: strategyAiStatus.online ? '#0ecb81' : '#f6465d' }}>
+                    AI: {strategyAiStatus.online ? '● Online' : '● Offline'}
+                  </span>
                 )}
               </div>
-            </div>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #722ed1' }}>
-            <h2 style={{ color: '#722ed1', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Brain size={24} color="#722ed1" /> Strategy AI Filter (Python)
-              </span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                {strategyAiStatus.online === null ? <span style={{ fontSize: '0.8rem', color: '#888' }}>Checking...</span>
-                  : strategyAiStatus.online ? <span style={{ fontSize: '0.8rem', color: '#0ecb81' }}>● Online</span>
-                  : <span style={{ fontSize: '0.8rem', color: '#f6465d' }}>● Offline</span>}
-                <button onClick={pingStrategyAi} disabled={pinging}
-                  style={{ padding: '0.3rem 0.8rem', background: 'rgba(114,46,209,0.2)', border: '1px solid #722ed1', color: '#722ed1', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem', opacity: pinging ? 0.6 : 1 }}>
-                  {pinging ? '...' : 'Ping'}
-                </button>
-              </span>
             </h2>
-            <p style={{ color: '#888', fontSize: '0.85rem', margin: '0 0 1.5rem 0' }}>
-              Python container วิเคราะห์ signal ก่อน execute
-              {strategyAiStatus.lastCheck && <span style={{ marginLeft: '0.5rem', color: '#555' }}>· checked {new Date(strategyAiStatus.lastCheck).toLocaleTimeString()}</span>}
-            </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1.5rem' }}>
-              <Field label="AI Filter Mode">
-                <select style={selectStyle} value={cfg.strategyAiMode} onChange={e => setCfg(k => ({ ...k, strategyAiMode: e.target.value }))}>
-                  <option value="off">Off</option>
-                  <option value="ml">ML Only</option>
-                  <option value="full">ML + LLM</option>
-                </select>
-              </Field>
-              <Field label="Confidence Threshold" hint="แนะนำ 0.65-0.75">
-                <input type="number" style={inputStyle} min={0.5} max={0.95} step={0.05}
-                  value={cfg.strategyAiConfidenceThreshold} onChange={e => setCfg(k => ({ ...k, strategyAiConfidenceThreshold: parseFloat(e.target.value) }))} />
+              <Field label="Quant Engine URL">
+                <input type="text" style={inputStyle} value={quantCfg.backend_url} onChange={e => setQuantCfg(c => ({ ...c, backend_url: e.target.value }))} />
               </Field>
               <Field label="Strategy AI URL">
-                <input type="text" style={inputStyle} value={cfg.strategyAiUrl} onChange={e => setCfg(k => ({ ...k, strategyAiUrl: e.target.value }))} />
+                <input type="text" style={inputStyle} value={quantCfg.strategy_ai_url} onChange={e => setQuantCfg(c => ({ ...c, strategy_ai_url: e.target.value }))} />
+              </Field>
+              <Field label="Platform API Gateway">
+                <input type="text" style={inputStyle} value={API || 'Local (Proxy)'} disabled />
               </Field>
             </div>
           </div>
 
-          {/* Log Level Panel */}
-          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #13c2c2' }}>
-            <h2 style={{ color: '#13c2c2', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Activity size={24} color="#13c2c2" /> Strategy AI — Log Level
+          {/* Strategy AI Global Logic */}
+          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #722ed1' }}>
+            <h2 style={{ color: '#722ed1', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Brain size={24} /> Intelligence Filter Logic
             </h2>
-            <p style={{ color: '#888', fontSize: '0.85rem', margin: '0 0 1.5rem 0' }}>
-              ปรับ verbosity ของ Python service แบบ real-time ไม่ต้อง restart container
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-              {(['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'] as const).map(lvl => {
-                const colors: Record<string, string> = {
-                  DEBUG: '#595959', INFO: '#13c2c2', WARNING: '#faad14', ERROR: '#f6465d', CRITICAL: '#722ed1',
-                };
-                const isActive = logLevel === lvl;
-                return (
-                  <button key={lvl} onClick={() => handleSaveLogLevel(lvl)} disabled={logLevelSaving || strategyAiStatus.online === false}
-                    style={{
-                      padding: '0.5rem 1.25rem', borderRadius: '6px', border: `1px solid ${isActive ? colors[lvl] : 'rgba(255,255,255,0.1)'}`,
-                      background: isActive ? `${colors[lvl]}22` : 'transparent',
-                      color: isActive ? colors[lvl] : '#666',
-                      fontWeight: isActive ? 700 : 400, cursor: 'pointer', fontSize: '0.85rem',
-                      transition: 'all 0.15s', opacity: logLevelSaving ? 0.6 : 1,
-                    }}>
-                    {lvl}
-                  </button>
-                );
-              })}
-              <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: logLevelSaved ? '#0ecb81' : '#555', transition: 'color 0.3s' }}>
-                {logLevelSaved ? '✓ Applied' : strategyAiStatus.online === false ? '⚠ Service offline' : `Current: ${logLevel}`}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                <Field label="Filter Mode">
+                  <select style={selectStyle} value={cfg.strategyAiMode} onChange={e => setCfg(k => ({ ...k, strategyAiMode: e.target.value }))}>
+                    <option value="off">Off (Raw Execution)</option>
+                    <option value="ml">ML Analysis Only</option>
+                    <option value="full">Comprehensive (ML + LLM)</option>
+                  </select>
+                </Field>
+                <Field label={`Confidence Threshold — ${(cfg.strategyAiConfidenceThreshold * 100).toFixed(0)}%`}>
+                  <input type="range" min={0.5} max={0.95} step={0.01} style={{ width: '100%' }}
+                    value={cfg.strategyAiConfidenceThreshold} onChange={e => setCfg(k => ({ ...k, strategyAiConfidenceThreshold: parseFloat(e.target.value) }))} />
+                </Field>
               </div>
-            </div>
-            <div style={{ marginTop: '1rem', display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.5rem' }}>
-              {[
-                { lvl: 'DEBUG',    desc: 'ทุก event รวม indicator values' },
-                { lvl: 'INFO',     desc: 'signal, confidence, latency' },
-                { lvl: 'WARNING',  desc: 'microstructure block, fallback' },
-                { lvl: 'ERROR',    desc: 'exception เท่านั้น' },
-                { lvl: 'CRITICAL', desc: 'crash-level เท่านั้น' },
-              ].map(({ lvl, desc }) => (
-                <div key={lvl} style={{ padding: '0.6rem', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', fontSize: '0.72rem', color: '#555' }}>
-                  <div style={{ fontWeight: 600, color: '#888', marginBottom: '0.2rem' }}>{lvl}</div>
-                  {desc}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button onClick={handleSaveCrypto} disabled={saving}
-              style={{ padding: '1rem 3rem', background: '#faad14', color: '#000', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem', opacity: saving ? 0.7 : 1 }}>
-              {saving ? 'Saving...' : 'Save All Configurations'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* POLYMARKET TAB */}
-      {tab === 'polymarket' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #ff6b35' }}>
-            <h2 style={{ color: '#ff6b35', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <TrendingUp size={24} color="#ff6b35" /> Polymarket Agent
-              </span>
-              {polyOnline === null ? <span style={{ fontSize: '0.8rem', color: '#888' }}>Checking...</span>
-                : polyOnline ? <span style={{ fontSize: '0.8rem', color: '#0ecb81' }}>● Service Online</span>
-                : <span style={{ fontSize: '0.8rem', color: '#f6465d' }}>● Service Offline</span>}
-            </h2>
-            <p style={{ color: '#888', fontSize: '0.85rem', margin: '0 0 1.5rem 0' }}>
-              ตั้งค่า AI model และ risk parameters สำหรับ BTC 5-minute prediction markets
-              {!polyOnline && <span style={{ color: '#f6465d', marginLeft: '0.5rem' }}>— uvicorn api_server:app --port 8080</span>}
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-              <Field label="AI Model" hint="Model ที่ใช้วิเคราะห์ market direction">
-                <select style={selectStyle} value={polyCfg.ai_model} onChange={e => setPolyCfg(p => ({ ...p, ai_model: e.target.value }))} disabled={!polyOnline}>
-                  <option value="">Default (config.py)</option>
-                  {AI_MODELS.map(m => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Max Bet per Trade (USDC)" hint="Kelly fraction คำนวณ size จริงจากค่านี้">
-                <input type="number" style={inputStyle} min={0.25} max={100} step={0.25}
-                  value={polyCfg.max_bet} onChange={e => setPolyCfg(p => ({ ...p, max_bet: parseFloat(e.target.value) }))} disabled={!polyOnline} />
-              </Field>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginTop: '1.5rem' }}>
-              <Field label={`Confidence Threshold — ${(polyCfg.confidence_threshold * 100).toFixed(0)}%`} hint="AI ต้องมั่นใจอย่างน้อยเท่านี้ถึงจะเปิด position">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <input type="range" min={0.5} max={0.95} step={0.01} style={{ flex: 1 }}
-                    value={polyCfg.confidence_threshold} onChange={e => setPolyCfg(p => ({ ...p, confidence_threshold: parseFloat(e.target.value) }))} disabled={!polyOnline} />
-                  <span style={{ minWidth: '42px', textAlign: 'right', fontWeight: 'bold',
-                    color: polyCfg.confidence_threshold >= 0.8 ? '#0ecb81' : polyCfg.confidence_threshold >= 0.65 ? '#faad14' : '#f6465d' }}>
-                    {(polyCfg.confidence_threshold * 100).toFixed(0)}%
-                  </span>
-                </div>
-              </Field>
-              <Field label="RAG Context (Learning)">
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: polyOnline ? 'pointer' : 'not-allowed', marginTop: '0.5rem' }}>
-                  <div onClick={() => polyOnline && setPolyCfg(p => ({ ...p, use_rag_context: !p.use_rag_context }))}
-                    style={{ width: '40px', height: '22px', borderRadius: '11px', position: 'relative', cursor: 'pointer', flexShrink: 0,
-                      background: polyCfg.use_rag_context ? '#ff6b35' : 'rgba(255,255,255,0.1)', transition: 'background 0.2s' }}>
-                    <div style={{ position: 'absolute', top: '3px', left: polyCfg.use_rag_context ? '21px' : '3px',
-                      width: '16px', height: '16px', borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 500 }}>{polyCfg.use_rag_context ? 'Enabled' : 'Disabled'}</div>
-                    <div style={{ fontSize: '0.72rem', color: '#555' }}>{polyCfg.use_rag_context ? 'AI เรียนรู้จาก trade ที่ผ่านมา' : 'ปิดเพื่อประหยัด token'}</div>
-                  </div>
-                </label>
-              </Field>
-            </div>
-            <div style={{ marginTop: '1.5rem', padding: '0.75rem 1rem', background: 'rgba(255,107,53,0.06)', borderRadius: '4px', border: '1px solid rgba(255,107,53,0.2)', fontSize: '0.8rem', color: '#ccc' }}>
-              <strong style={{ color: '#ff6b35' }}>Flow:</strong> Scan BTC 5m → Rule-based → AI predict (conf {'>'}= {(polyCfg.confidence_threshold * 100).toFixed(0)}%) → Execute on Polymarket CLOB
-            </div>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button onClick={handleSavePoly} disabled={polySaving || !polyOnline}
-              style={{ padding: '1rem 3rem', background: polySaved ? '#0ecb81' : '#ff6b35', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: polyOnline ? 'pointer' : 'not-allowed', opacity: !polyOnline ? 0.5 : 1, fontSize: '1rem', transition: '0.2s' }}>
-              {polySaved ? 'Saved' : polySaving ? 'Saving...' : 'Save Polymarket Config'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* QUANT ENGINE TAB */}
-      {tab === 'quant' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-
-          {/* Status bar */}
-          <div className="glass-panel" style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '4px solid #a78bfa' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <Zap size={20} color="#a78bfa" />
+              
+              {/* Log Level Management */}
               <div>
-                <span style={{ fontWeight: 600, color: 'var(--text-main)' }}>Quant Engine</span>
-                <span style={{ marginLeft: '0.75rem', fontSize: '0.8rem', color: quantOnline ? '#0ecb81' : '#f6465d' }}>
-                  {quantOnline === null ? '● Checking...' : quantOnline ? '● Online — localhost:8002' : '● Offline — localhost:8002'}
-                </span>
+                <Field label="Real-time Log Level (DevOps)">
+                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+                    {['DEBUG', 'INFO', 'WARNING', 'ERROR'].map(lvl => (
+                      <button key={lvl} onClick={() => handleSaveLogLevel(lvl)}
+                        style={{
+                          flex: 1, padding: '0.5rem', borderRadius: '4px', cursor: 'pointer',
+                          background: logLevel === lvl ? '#722ed133' : 'rgba(255,255,255,0.03)',
+                          border: `1px solid ${logLevel === lvl ? '#722ed1' : 'rgba(255,255,255,0.1)'}`,
+                          color: logLevel === lvl ? '#722ed1' : '#666',
+                          fontSize: '0.8rem', fontWeight: 600
+                        }}>
+                        {lvl}
+                      </button>
+                    ))}
+                  </div>
+                </Field>
               </div>
             </div>
-            <button onClick={fetchQuantCfg} disabled={quantPinging}
-              style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.8rem', background: 'transparent', border: '1px solid var(--border-color)', color: 'var(--text-main)', borderRadius: '4px', cursor: 'pointer', fontSize: '0.82rem', opacity: quantPinging ? 0.6 : 1 }}>
-              <RefreshCw size={13} /> {quantPinging ? 'Checking...' : 'Refresh'}
-            </button>
           </div>
 
-          {!quantOnline && (
-            <div style={{ padding: '0.9rem 1.2rem', background: 'rgba(246,70,93,0.08)', border: '1px solid rgba(246,70,93,0.3)', borderRadius: '6px', fontSize: '0.85rem', color: '#f6465d' }}>
-              Quant Engine is not running. Start it with: <code style={{ background: 'rgba(0,0,0,0.3)', padding: '0.1rem 0.4rem', borderRadius: '3px' }}>cd packages/quant-engine && uvicorn main:app --port 8002 --reload</code>
+          {/* ETL & Quant Pipeline */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+            <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #13c2c2' }}>
+              <h2 style={{ color: '#13c2c2', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Activity size={24} /> Data ETL Pipeline
+              </h2>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                <Field label="Active Symbols" hint="Comma-separated">
+                  <input type="text" style={inputStyle} value={quantCfg.etl_symbols} onChange={e => setQuantCfg(c => ({ ...c, etl_symbols: e.target.value }))} />
+                </Field>
+                <Field label="Base Timeframe">
+                  <select style={selectStyle} value={quantCfg.etl_interval} onChange={e => setQuantCfg(c => ({ ...c, etl_interval: e.target.value }))}>
+                    {['1m','5m','15m','1h','4h'].map(v => <option key={v} value={v}>{v}</option>)}
+                  </select>
+                </Field>
+              </div>
             </div>
-          )}
 
-          {/* Service URLs */}
-          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #a78bfa' }}>
-            <h2 style={{ color: '#a78bfa', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Cpu size={22} color="#a78bfa" /> Service Connections
-            </h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-              <Field label="Backend URL" hint="Node.js backend สำหรับ deploy/stop bots">
-                <input type="text" style={inputStyle} value={quantCfg.backend_url}
-                  onChange={e => setQuantCfg(c => ({ ...c, backend_url: e.target.value }))}
-                  disabled={!quantOnline} placeholder="http://localhost:4001" />
-              </Field>
-              <Field label="Strategy AI URL" hint="Python strategy-ai สำหรับ backtest และ register">
-                <input type="text" style={inputStyle} value={quantCfg.strategy_ai_url}
-                  onChange={e => setQuantCfg(c => ({ ...c, strategy_ai_url: e.target.value }))}
-                  disabled={!quantOnline} placeholder="http://localhost:8000" />
-              </Field>
-            </div>
-          </div>
-
-          {/* ETL Settings */}
-          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #13c2c2' }}>
-            <h2 style={{ color: '#13c2c2', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Activity size={22} color="#13c2c2" /> ETL Pipeline
-            </h2>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-              <Field label="ETL Symbols" hint="คั่นด้วย comma เช่น BTCUSDT,ETHUSDT,SOLUSDT">
-                <input type="text" style={inputStyle} value={quantCfg.etl_symbols}
-                  onChange={e => setQuantCfg(c => ({ ...c, etl_symbols: e.target.value }))}
-                  disabled={!quantOnline} placeholder="BTCUSDT,ETHUSDT" />
-              </Field>
-              <Field label="ETL Interval" hint="Kline interval สำหรับ OHLCV data">
-                <select style={selectStyle} value={quantCfg.etl_interval}
-                  onChange={e => setQuantCfg(c => ({ ...c, etl_interval: e.target.value }))}
-                  disabled={!quantOnline}>
-                  {['1m','3m','5m','15m','30m','1h','2h','4h','1d'].map(v => (
-                    <option key={v} value={v}>{v}</option>
-                  ))}
-                </select>
+            <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #f6465d' }}>
+              <h2 style={{ color: '#f6465d', margin: '0 0 1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Zap size={24} /> Alpha Decay Management
+              </h2>
+              <Field label={`Decay Threshold — ${quantCfg.decay_threshold}`} hint="Strategies exceeding this score will be retired.">
+                <input type="range" min={30} max={95} step={5} style={{ width: '100%', marginTop: '1rem' }}
+                  value={quantCfg.decay_threshold} onChange={e => setQuantCfg(c => ({ ...c, decay_threshold: Number(e.target.value) }))} />
               </Field>
             </div>
           </div>
 
-          {/* Decay Settings */}
-          <div className="glass-panel" style={{ padding: '2rem', borderTop: '4px solid #f6465d' }}>
-            <h2 style={{ color: '#f6465d', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <Brain size={22} color="#f6465d" /> Alpha Decay Threshold
-            </h2>
-            <p style={{ color: '#888', fontSize: '0.85rem', margin: '0 0 1.5rem 0' }}>
-              Strategy ที่มี decay score เกินค่านี้จะถูก retire และส่งไป mutate อัตโนมัติ
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-              <input type="range" min={30} max={95} step={5} style={{ flex: 1 }}
-                value={quantCfg.decay_threshold}
-                onChange={e => setQuantCfg(c => ({ ...c, decay_threshold: Number(e.target.value) }))}
-                disabled={!quantOnline} />
-              <span style={{ fontSize: '1.5rem', fontWeight: 700, minWidth: '55px', textAlign: 'center',
-                color: quantCfg.decay_threshold >= 80 ? '#0ecb81' : quantCfg.decay_threshold >= 60 ? '#faad14' : '#f6465d' }}>
-                {quantCfg.decay_threshold}
-              </span>
-              <span style={{ fontSize: '0.8rem', color: '#888', minWidth: '80px' }}>
-                {quantCfg.decay_threshold >= 80 ? 'Conservative' : quantCfg.decay_threshold >= 60 ? 'Balanced' : 'Aggressive'}
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem', marginTop: '1rem' }}>
-              {[{ label: 'Conservative', value: 80, desc: 'retire เฉพาะ strategy ที่แย่มาก' },
-                { label: 'Balanced', value: 70, desc: 'default — สมดุลระหว่าง stability และ evolution' },
-                { label: 'Aggressive', value: 50, desc: 'retire เร็ว mutate บ่อย' }].map(p => (
-                <button key={p.value} onClick={() => setQuantCfg(c => ({ ...c, decay_threshold: p.value }))}
-                  disabled={!quantOnline}
-                  style={{ padding: '0.6rem', background: quantCfg.decay_threshold === p.value ? 'rgba(163,139,250,0.15)' : 'rgba(255,255,255,0.02)',
-                    border: `1px solid ${quantCfg.decay_threshold === p.value ? '#a78bfa' : 'var(--border-color)'}`,
-                    borderRadius: '6px', cursor: 'pointer', textAlign: 'left' }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.82rem', color: quantCfg.decay_threshold === p.value ? '#a78bfa' : 'var(--text-main)', marginBottom: '0.2rem' }}>
-                    {p.label} ({p.value})
-                  </div>
-                  <div style={{ fontSize: '0.72rem', color: '#666' }}>{p.desc}</div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button onClick={handleSaveQuant} disabled={quantSaving || !quantOnline}
-              style={{ padding: '1rem 3rem', background: quantSaved ? '#0ecb81' : '#a78bfa', color: '#fff', border: 'none', borderRadius: '4px', fontWeight: 'bold', cursor: quantOnline ? 'pointer' : 'not-allowed', opacity: !quantOnline ? 0.5 : 1, fontSize: '1rem', transition: '0.2s' }}>
-              {quantSaved ? '✓ Saved' : quantSaving ? 'Saving...' : 'Save Quant Config'}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1rem', gap: '1rem' }}>
+             <button onClick={handleSaveQuant} disabled={quantSaving}
+              style={{ padding: '1rem 3rem', background: '#a78bfa', color: '#000', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem', opacity: quantSaving ? 0.7 : 1 }}>
+              {quantSaving ? 'Syncing...' : 'Deploy System Config'}
             </button>
           </div>
         </div>

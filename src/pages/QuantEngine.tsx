@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Brain, Activity, TrendingUp, TrendingDown, AlertTriangle, RefreshCw, Zap, BarChart2, Clock, GitBranch } from 'lucide-react';
+import { 
+  Brain, Activity, TrendingUp, TrendingDown, AlertTriangle, 
+  RefreshCw, Zap, Clock, GitBranch, Play,
+  Plus, Trash2, Globe, Database, Rss, Shield, Check, X, ExternalLink, Search,
+  Eye, List, Settings, Save, ChevronRight, Info, Layers, Cloud, Link as LinkIcon,
+  Calendar, Sparkles, Cpu
+} from 'lucide-react';
+import { AI_MODELS } from '../constants/aiModels';
 
 const QUANT_URL = 'http://localhost:8002';
 
@@ -10,50 +17,24 @@ interface AgentStatus {
   last_error?: string;
 }
 
-interface ApprovedStrategy {
-  strategy_key: string;
-  backtest_metrics: Record<string, number>;
-  approved_at: string;
-  status: 'active' | 'retired' | 'decayed';
-  lineage_id: string;
-  mutation_count: number;
-  bot_id?: string;
+interface ResearchSource {
+  id: number;
+  name: string;
+  type: 'scraper' | 'api' | 'rss';
+  url: string;
+  enabled: boolean;
+  last_scanned: string | null;
+  config: any;
 }
 
-interface StrategyAllocation {
-  strategy_key: string;
-  weight: number;
-  capital_usdt: number;
-  volatility: number;
-}
-
-interface DecayEvent {
-  strategy_key: string;
-  decay_score: number;
-  consecutive_losses: number;
-  rolling_sharpe_30d: number;
-  max_drawdown_7d: number;
-  action: string;
-  timestamp: string;
-}
-
-interface CycleHistory {
-  cycle_id: string;
-  started_at: string;
-  completed_at: string;
-  strategies_generated: number;
-  strategies_approved: number;
-  strategies_rejected: number;
-  errors: unknown[];
-}
-
-interface SentimentScore {
-  symbol: string;
-  score: number;
-  funding_rate: number;
-  oi_change_pct: number;
-  timestamp: string;
-  components: Record<string, number>;
+interface ScoutFinding {
+  title: string;
+  link: string;
+  description: string;
+  timestamp?: string;
+  ai_summary?: string;
+  alpha_potential?: string;
+  is_from_db?: boolean;
 }
 
 const STATE_COLOR: Record<string, string> = {
@@ -63,40 +44,43 @@ const STATE_COLOR: Record<string, string> = {
   timeout: '#ff7875',
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  active: 'var(--profit-color)',
-  retired: 'var(--text-muted)',
-  decayed: 'var(--loss-color)',
+const TYPE_COLORS = {
+  scraper: { bg: 'rgba(0, 209, 255, 0.12)', text: '#00d1ff', icon: Globe },
+  api: { bg: 'rgba(187, 107, 217, 0.12)', text: '#d683ed', icon: Database },
+  rss: { bg: 'rgba(255, 122, 0, 0.12)', text: '#ff9c45', icon: Rss },
 };
 
-function ScoreGauge({ score }: { score: number }) {
-  const color = score >= 60 ? 'var(--profit-color)' : score <= 40 ? 'var(--loss-color)' : '#faad14';
-  const label = score >= 60 ? 'Bullish' : score <= 40 ? 'Bearish' : 'Neutral';
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' }}>
-      <div style={{ fontSize: '1.8rem', fontWeight: 700, color }}>{score.toFixed(1)}</div>
-      <div style={{ fontSize: '0.75rem', color, fontWeight: 600 }}>{label}</div>
-      <div style={{ width: '80px', height: '6px', background: 'var(--bg-dark)', borderRadius: '3px', overflow: 'hidden' }}>
-        <div style={{ width: `${score}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.5s' }} />
-      </div>
-    </div>
-  );
-}
-
-function AgentCard({ name, status }: { name: string; status: AgentStatus | undefined }) {
+function AgentCard({ name, status, QUANT_URL, onRefresh }: { name: string; status: AgentStatus | undefined; QUANT_URL: string; onRefresh: () => void }) {
+  const [isTriggering, setIsTriggering] = useState(false);
+  const triggerAgent = async () => {
+    setIsTriggering(true);
+    try {
+      const slug = name.toLowerCase().replace(' ', '_');
+      await fetch(`${QUANT_URL}/loop/agents/${slug}/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      setTimeout(onRefresh, 1000);
+    } catch (err) { console.error(err); } finally { setIsTriggering(false); }
+  };
   const state = status?.state ?? 'idle';
   const color = STATE_COLOR[state] ?? 'var(--text-muted)';
   const lastRun = status?.last_run ? new Date(status.last_run).toLocaleTimeString() : '—';
+  const canTrigger = ['scout_agent', 'sentiment_agent', 'data_agent'].includes(name.toLowerCase().replace(' ', '_'));
+
   return (
-    <div className="glass-panel" style={{ padding: '0.9rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+    <div className="glass-panel" style={{ padding: '0.9rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.4rem', border: state === 'running' ? '1px solid var(--accent-primary)' : '1px solid transparent' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-main)' }}>{name}</span>
+        <span style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-main)', textTransform: 'capitalize' }}>{name.replace('_', ' ')}</span>
         <span style={{ fontSize: '0.75rem', color, fontWeight: 600, textTransform: 'uppercase' }}>● {state}</span>
       </div>
       <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Last run: {lastRun}</div>
-      {status?.last_error && (
-        <div style={{ fontSize: '0.7rem', color: 'var(--loss-color)', background: 'rgba(246,70,93,0.08)', padding: '0.2rem 0.4rem', borderRadius: '3px', wordBreak: 'break-all' }}>
-          {status.last_error}
+      {canTrigger && (
+        <div style={{ display: 'flex', gap: '0.4rem', marginTop: '0.3rem' }}>
+          <button className="btn-outline" onClick={(e) => { e.stopPropagation(); triggerAgent(); }} disabled={isTriggering || state === 'running'} style={{ flex: 1, fontSize: '0.65rem' }}>
+            {isTriggering ? '...' : <><Play size={10} /> Trigger</>}
+          </button>
         </div>
       )}
     </div>
@@ -104,355 +88,549 @@ function AgentCard({ name, status }: { name: string; status: AgentStatus | undef
 }
 
 export default function QuantEngine() {
+  const [activeTab, setActiveTab] = useState<'overview' | 'strategies' | 'scout'>('overview');
   const [agentStatuses, setAgentStatuses] = useState<Record<string, AgentStatus>>({});
-  const [strategies, setStrategies] = useState<ApprovedStrategy[]>([]);
-  const [allocations, setAllocations] = useState<StrategyAllocation[]>([]);
-  const [decayEvents, setDecayEvents] = useState<DecayEvent[]>([]);
-  const [cycleHistory, setCycleHistory] = useState<CycleHistory[]>([]);
-  const [sentimentScores, setSentimentScores] = useState<SentimentScore[]>([]);
+  const [researchSources, setResearchSources] = useState<ResearchSource[]>([]);
   const [isOnline, setIsOnline] = useState(false);
-  const [isTriggering, setIsTriggering] = useState(false);
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'strategies' | 'sentiment' | 'history'>('overview');
+  const [selectedSourceId, setSelectedSourceId] = useState<number | null>(null);
+  const [inspectMode, setInspectMode] = useState<'config' | 'preview'>('config');
+  const [showAddForm, setShowAddForm] = useState(false);
+  
+  const [editUrl, setEditUrl] = useState('');
+  const [editConfig, setEditConfig] = useState<any>({});
+  const [scrapedFindings, setScrapedFindings] = useState<ScoutFinding[]>([]);
+  const [isActionLoading, setIsActionLoading] = useState(false);
+  const [isCycleTriggering, setIsCycleTriggering] = useState(false);
+  const [newSource, setNewSource] = useState({ name: '', type: 'scraper', url: '' });
 
-  const SYMBOLS = ['BTCUSDT', 'ETHUSDT'];
+  // Agent Settings (LLM)
+  const [agentModel, setAgentModel] = useState<string>('anthropic/claude-3-haiku');
+
+  // AI Summary States
+  const [itemSummaries, setItemSummaries] = useState<Record<string, string>>({});
+  const [isSummarizing, setIsSummarizing] = useState<string | null>(null);
+  const [isArchiving, setIsArchiving] = useState<string | null>(null);
+  const [archivedLinks, setArchivedLinks] = useState<Set<string>>(new Set());
+  const [previewFinding, setPreviewFinding] = useState<ScoutFinding | null>(null);
 
   const fetchAll = useCallback(async () => {
     try {
       const healthRes = await fetch(`${QUANT_URL}/health`);
-      if (!healthRes.ok) { setIsOnline(false); return; }
-      setIsOnline(true);
-
-      const [statusRes, strategiesRes, allocRes, decayRes, historyRes] = await Promise.allSettled([
+      setIsOnline(healthRes.ok);
+      if (!healthRes.ok) return;
+      const [statusRes, sourcesRes, settingsRes] = await Promise.all([
         fetch(`${QUANT_URL}/status`),
-        fetch(`${QUANT_URL}/strategies`),
-        fetch(`${QUANT_URL}/strategies/allocations?total_capital=10000`),
-        fetch(`${QUANT_URL}/loop/history`),
-        fetch(`${QUANT_URL}/loop/history`),
+        fetch(`${QUANT_URL}/loop/research-sources`),
+        fetch(`${QUANT_URL}/loop/agents/scout_agent/settings`),
       ]);
-
-      if (statusRes.status === 'fulfilled' && statusRes.value.ok) {
-        const d = await statusRes.value.json();
-        setAgentStatuses(d.agents ?? {});
-      }
-      if (strategiesRes.status === 'fulfilled' && strategiesRes.value.ok) {
-        setStrategies(await strategiesRes.value.json());
-      }
-      if (allocRes.status === 'fulfilled' && allocRes.value.ok) {
-        setAllocations(await allocRes.value.json());
-      }
-      if (decayRes.status === 'fulfilled' && decayRes.value.ok) {
-        const hist = await decayRes.value.json() as CycleHistory[];
-        setCycleHistory(hist);
-      }
-      if (historyRes.status === 'fulfilled' && historyRes.value.ok) {
-        const hist = await historyRes.value.json() as CycleHistory[];
-        setCycleHistory(hist);
-      }
-
-      // Fetch sentiment for each symbol
-      const sentResults = await Promise.allSettled(
-        SYMBOLS.map(s => fetch(`${QUANT_URL}/sentiment/${s}`).then(r => r.ok ? r.json() : null))
-      );
-      const scores = sentResults
-        .filter(r => r.status === 'fulfilled' && r.value)
-        .map(r => (r as PromiseFulfilledResult<SentimentScore>).value);
-      setSentimentScores(scores);
-
-      setLastRefresh(new Date());
-    } catch {
-      setIsOnline(false);
-    }
+      if (statusRes.ok) setAgentStatuses((await statusRes.json()).agents ?? {});
+      if (sourcesRes.ok) setResearchSources(await sourcesRes.json());
+      if (settingsRes.ok) setAgentModel((await settingsRes.json()).model);
+    } catch { setIsOnline(false); }
   }, []);
 
   useEffect(() => {
     fetchAll();
-    const id = setInterval(fetchAll, 15000);
+    const id = setInterval(fetchAll, 10000);
     return () => clearInterval(id);
   }, [fetchAll]);
 
+  const updateAgentModel = async (model: string) => {
+    setAgentModel(model);
+    try {
+      await fetch(`${QUANT_URL}/loop/agents/scout_agent/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model_name: model }),
+      });
+    } catch (err) { console.error(err); }
+  };
+
+  const handleInspect = (id: number, mode: 'config' | 'preview') => {
+    const source = researchSources.find(s => s.id === id);
+    if (!source) return;
+    setSelectedSourceId(id);
+    setInspectMode(mode);
+    setEditUrl(source.url);
+    setEditConfig(source.config || {});
+    setShowAddForm(false);
+    if (mode === 'preview') {
+      triggerPreview(id);
+      setPreviewFinding(null); // Reset preview when switching sources
+    }
+  };
+
+  const triggerPreview = async (id: number) => {
+    setIsActionLoading(true);
+    setScrapedFindings([]);
+    try {
+      const res = await fetch(`${QUANT_URL}/loop/agents/scout_agent_scrape/trigger`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_id: id }),
+      });
+      if (res.ok) {
+          const data = await res.json();
+          setScrapedFindings(data.findings || []);
+          // Sync summaries from DB findings
+          const dbSummaries: Record<string, string> = {};
+          data.findings.forEach((f: ScoutFinding) => {
+            if (f.ai_summary) dbSummaries[f.link] = f.ai_summary;
+          });
+          setItemSummaries(prev => ({ ...prev, ...dbSummaries }));
+      }
+    } finally { setIsActionLoading(false); }
+  };
+
+  const summarizeFinding = async (item: ScoutFinding, force: boolean = false) => {
+    if (isSummarizing) return;
+    setIsSummarizing(item.link);
+    try {
+      const res = await fetch(`${QUANT_URL}/loop/research/summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ link: item.link, force }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setItemSummaries(prev => ({ ...prev, [item.link]: data.summary }));
+        if (force) {
+          setArchivedLinks(prev => {
+            const next = new Set(prev);
+            next.delete(item.link);
+            return next;
+          });
+        }
+      }
+    } finally { setIsSummarizing(null); }
+  };
+
+  const archiveToBrain = async (item: ScoutFinding) => {
+    if (isArchiving) return;
+    setIsArchiving(item.link);
+    try {
+      const res = await fetch(`${QUANT_URL}/loop/research/save-to-brain`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ link: item.link }),
+      });
+      if (res.ok) {
+        setArchivedLinks(prev => {
+          const next = new Set(prev);
+          next.add(item.link);
+          return next;
+        });
+      }
+    } catch (err) { console.error(err); } finally { setIsArchiving(null); }
+  };
+
+  const saveSourceConfig = async () => {
+    if (!selectedSourceId) return;
+    setIsActionLoading(true);
+    try {
+      await fetch(`${QUANT_URL}/loop/research-sources/${selectedSourceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: editUrl, config: editConfig }),
+      });
+      await fetchAll();
+      alert('Updated');
+    } finally { setIsActionLoading(false); }
+  };
+
+  const toggleSource = async (id: number, current: boolean) => {
+    await fetch(`${QUANT_URL}/loop/research-sources/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: !current }),
+    });
+    fetchAll();
+  };
+
+  const addNewSource = async () => {
+    if (!newSource.name || !newSource.url) return;
+    await fetch(`${QUANT_URL}/loop/research-sources`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...newSource, config: {} }),
+    });
+    setNewSource({ name: '', type: 'scraper', url: '' });
+    setShowAddForm(false);
+    fetchAll();
+  };
+
+  const deleteSource = async (id: number) => {
+    if (confirm('Delete?')) {
+      await fetch(`${QUANT_URL}/loop/research-sources/${id}`, { method: 'DELETE' });
+      setSelectedSourceId(null);
+      fetchAll();
+    }
+  };
+
   const triggerCycle = async () => {
-    setIsTriggering(true);
+    setIsCycleTriggering(true);
     try {
       await fetch(`${QUANT_URL}/loop/trigger`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ topic: 'momentum and mean-reversion hybrid strategy for crypto futures' }),
+        body: JSON.stringify({ topic: 'auto' }),
       });
       setTimeout(fetchAll, 2000);
-    } finally {
-      setIsTriggering(false);
-    }
+    } finally { setIsCycleTriggering(false); }
   };
 
-  const activeCount = strategies.filter(s => s.status === 'active').length;
-  const decayedCount = strategies.filter(s => s.status === 'decayed').length;
-  const runningAgents = Object.values(agentStatuses).filter(a => a.state === 'running').length;
+  const formatTs = (ts?: string) => {
+    if (!ts) return '';
+    try {
+       const d = new Date(ts);
+       return d.toLocaleString('th-TH', { 
+         day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+         timeZone: 'Asia/Bangkok'
+       });
+    } catch { return ts; }
+  };
 
-  const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'strategies', label: `Strategies (${strategies.length})` },
-    { id: 'sentiment', label: 'Sentiment' },
-    { id: 'history', label: 'Cycle History' },
-  ] as const;
+  const inputStyle: React.CSSProperties = {
+    textAlign: 'left', background: 'rgba(0,0,0,0.4)', border: '1px solid rgba(255,255,255,0.15)',
+    color: '#ffffff', padding: '0.75rem', borderRadius: '10px', width: '100%', outline: 'none', fontSize: '0.9rem'
+  };
+
+  const selectedSource = researchSources.find(s => s.id === selectedSourceId);
 
   return (
-    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-
-      {/* Header */}
-      <div className="glass-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <Brain size={28} color="var(--accent-primary)" />
+    <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', color: '#f0f0f0', minHeight: '85vh' }}>
+      
+      {/* 🔵 HEADER */}
+      <div className="glass-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderRadius: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <Brain size={24} color="var(--accent-primary)" />
           <div>
-            <h2 style={{ margin: 0, fontSize: '1.3rem' }}>Evolutionary Quant Engine</h2>
-            <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-              {isOnline ? '● Online — quant-engine:8002' : '○ Offline — quant-engine:8002 unreachable'}
+            <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700 }}>Quant Intelligence Hub</h2>
+            <p style={{ margin: 0, fontSize: '0.75rem', color: isOnline ? '#22c55e' : '#ef4444' }}>
+              ● {isOnline ? 'System Online' : 'System Offline'}
             </p>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-          {lastRefresh && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Updated {lastRefresh.toLocaleTimeString()}</span>}
-          <button className="btn-outline" onClick={fetchAll} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.8rem' }}>
-            <RefreshCw size={14} /> Refresh
-          </button>
-          <button className="btn-primary" onClick={triggerCycle} disabled={!isOnline || isTriggering}
-            style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', padding: '0.4rem 0.9rem' }}>
-            <Zap size={14} /> {isTriggering ? 'Running...' : 'Trigger Cycle'}
+        <div style={{ display: 'flex', gap: '1.2rem', alignItems: 'center' }}>
+           <div style={{ display: 'flex', background: 'rgba(255,255,255,0.03)', padding: '0.25rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)' }}>
+             {['overview', 'strategies', 'scout'].map(t => (
+               <button key={t} onClick={() => setActiveTab(t as any)} 
+                 style={{ 
+                   background: activeTab === t ? 'rgba(0,122,255,0.2)' : 'transparent',
+                   border: 'none', color: activeTab === t ? '#fff' : 'rgba(255,255,255,0.4)',
+                   padding: '0.5rem 1.2rem', borderRadius: '10px', cursor: 'pointer', transition: 'all 0.2s',
+                   fontSize: '0.8rem', fontWeight: 600, textTransform: 'uppercase'
+                 }}>{t}</button>
+             ))}
+           </div>
+           <button className="btn-primary" onClick={triggerCycle} disabled={isCycleTriggering}>
+            <Zap size={14} /> {isCycleTriggering ? 'Running...' : 'Cycle'}
           </button>
         </div>
       </div>
 
-      {!isOnline && (
-        <div style={{ background: 'rgba(246,70,93,0.1)', border: '1px solid var(--loss-color)', borderRadius: '8px', padding: '1rem', color: 'var(--loss-color)', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-          <AlertTriangle size={16} /> quant-engine service is not reachable. Make sure it's running on port 8002.
+      {activeTab === 'scout' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', flex: 1 }}>
+           
+           <div className="glass-panel" style={{ padding: '1rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                  <Cpu size={18} color="var(--accent-primary)" />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>RESEARCH LLM:</span>
+                  <select 
+                    value={agentModel} 
+                    onChange={e => updateAgentModel(e.target.value)}
+                    style={{ 
+                        background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)',
+                        color: '#fff', borderRadius: '8px', padding: '0.4rem 1rem', fontSize: '0.8rem', outline: 'none'
+                     }}>
+                     {AI_MODELS.map(m => (
+                       <option key={m.value} value={m.value} style={{ background: '#1a1a1a' }}>{m.label}</option>
+                     ))}
+                  </select>
+              </div>
+              <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)' }}>
+                 Select the brain for scout intelligence and synthesis
+              </div>
+           </div>
+
+           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', flex: 1 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+                   <div className="glass-panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>{researchSources.length}</div>
+                      <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>Pipelines</div>
+                   </div>
+                   <div className="glass-panel" style={{ padding: '1rem', color: '#22c55e', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>{researchSources.filter(s=>s.enabled).length}</div>
+                      <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>Active</div>
+                   </div>
+                   <div className="glass-panel" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 700 }}>{scrapedFindings.length}</div>
+                      <div style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>Current Findings</div>
+                   </div>
+                   <button className="btn-primary" onClick={() => { setShowAddForm(true); setSelectedSourceId(null); setPreviewFinding(null); }} style={{ height: '100%', borderRadius: '16px' }}>
+                      <Plus size={18} /> Provision Source
+                   </button>
+                </div>
+
+                <div className="glass-panel" style={{ padding: '1rem', display: 'flex', gap: '1rem', overflowX: 'auto', whiteSpace: 'nowrap' }}>
+                   {researchSources.map(s => {
+                     const Config = TYPE_COLORS[s.type as keyof typeof TYPE_COLORS] || TYPE_COLORS.scraper;
+                     const Icon = Config.icon;
+                     const isActive = selectedSourceId === s.id;
+                     return (
+                       <div key={s.id} onClick={() => { handleInspect(s.id, 'preview'); setInspectMode('preview'); setPreviewFinding(null); }}
+                         className="glass-panel"
+                         style={{ 
+                           display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.6rem 1rem',
+                           background: isActive ? 'rgba(0,122,255,0.1)' : 'rgba(255,255,255,0.02)',
+                           borderRadius: '12px', border: isActive ? '1px solid var(--accent-primary)' : '1px solid rgba(255,255,255,0.05)',
+                           cursor: 'pointer', minWidth: '240px', transition: 'all 0.2s'
+                         }}>
+                         <div style={{ width: '32px', height: '32px', background: Config.bg, borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: Config.text }}>
+                            <Icon size={16} />
+                         </div>
+                         <div style={{ flex: 1, overflow: 'hidden' }}>
+                            <div style={{ fontWeight: 600, fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</div>
+                            <div style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.3)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.type}</div>
+                         </div>
+                         <div onClick={e => { e.stopPropagation(); handleInspect(s.id, 'config'); setInspectMode('config'); setPreviewFinding(null); }} style={{ opacity: 0.4, cursor: 'pointer' }}>
+                            <Settings size={14} />
+                         </div>
+                       </div>
+                     );
+                   })}
+                </div>
+              </div>
+
+              <div className="glass-panel" style={{ 
+                flex: 1, padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.5rem', 
+                minHeight: '500px', position: 'relative', overflow: 'hidden' 
+              }}>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                       <List size={20} color="var(--accent-primary)" />
+                       <h3 style={{ margin: 0 }}>Scout Discovery Feed</h3>
+                    </div>
+                    {selectedSource && (
+                       <div style={{ display: 'flex', gap: '0.75rem' }}>
+                          <button className="btn-outline" onClick={() => triggerPreview(selectedSource.id)} disabled={isActionLoading}>
+                             <RefreshCw size={14} className={isActionLoading ? 'spin' : ''} /> Refresh {selectedSource.name}
+                          </button>
+                          <button className="btn-outline" onClick={() => setSelectedSourceId(null)}><X size={14} /> Clear</button>
+                       </div>
+                    )}
+                 </div>
+
+                 {showAddForm ? (
+                    <div className="animate-fade-in" style={{ maxWidth: '600px', margin: '2rem auto', width: '100%', display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                       <h4>Provision New Pipeline</h4>
+                       <input type="text" placeholder="Category Name" value={newSource.name} onChange={e=>setNewSource({...newSource, name: e.target.value})} style={inputStyle} />
+                       <select value={newSource.type} onChange={e=>setNewSource({...newSource, type: e.target.value as any})} style={{ ...inputStyle, cursor: 'pointer' }}>
+                          <option value="scraper" style={{ background: '#1a1a1a' }}>Scraper Engine</option>
+                          <option value="api" style={{ background: '#1a1a1a' }}>API / AI Search</option>
+                          <option value="rss" style={{ background: '#1a1a1a' }}>RSS / Atom</option>
+                       </select>
+                       <input type="text" placeholder="Endpoint URL" value={newSource.url} onChange={e=>setNewSource({...newSource, url: e.target.value})} style={inputStyle} />
+                       <button className="btn-primary" onClick={addNewSource} style={{ padding: '0.8rem', borderRadius: '12px' }}>Initialize Pipeline</button>
+                       <button className="btn-outline" onClick={() => setShowAddForm(false)}>Cancel</button>
+                    </div>
+                 ) : selectedSource && inspectMode === 'config' ? (
+                    <div className="animate-fade-in" style={{ maxWidth: '600px', margin: '2rem auto', width: '100%', display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                       <h4>Pipe Configuration: {selectedSource.name}</h4>
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          <label style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>Target URL</label>
+                          <input type="text" value={editUrl} onChange={e => setEditUrl(e.target.value)} style={inputStyle} />
+                       </div>
+                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          <label style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', textTransform: 'uppercase' }}>Object Limit</label>
+                          <input type="number" value={editConfig.limit || editConfig.max_results || 10} onChange={e => setEditConfig({...editConfig, limit: parseInt(e.target.value), max_results: parseInt(e.target.value)})} style={inputStyle} />
+                       </div>
+                       <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+                          <button className="btn-outline" onClick={() => toggleSource(selectedSource.id, selectedSource.enabled)} style={{ flex: 1 }}>
+                             {selectedSource.enabled ? 'Deactivate' : 'Activate'}
+                          </button>
+                          <button className="btn-primary" onClick={saveSourceConfig} disabled={isActionLoading} style={{ flex: 2 }}>Apply Config</button>
+                       </div>
+                       <button className="btn-text" onClick={() => deleteSource(selectedSource.id)} style={{ color: '#ef4444', marginTop: '2rem' }}>Terminate Pipeline</button>
+                    </div>
+                 ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '1.5rem', width: '100%' }}>
+                       {isActionLoading ? (
+                          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '5rem' }}>
+                             <RefreshCw className="spin" size={32} color="var(--accent-primary)" />
+                             <p style={{ marginTop: '1rem', color: 'var(--text-muted)' }}>Scanning latest alpha ideas...</p>
+                          </div>
+                       ) : scrapedFindings.length > 0 ? (
+                          scrapedFindings.map((f, i) => (
+                             <div key={i} className="glass-panel" 
+                                style={{ 
+                                  padding: '1.25rem', background: 'rgba(255,255,255,0.02)', borderRadius: '16px', 
+                                  display: 'flex', flexDirection: 'column', gap: '0.75rem', height: '100%',
+                                  transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', cursor: 'pointer', border: '1px solid rgba(255,255,255,0.05)',
+                                }}
+                                onClick={() => setPreviewFinding(f)}
+                              >
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1 }}>
+                                      <div style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>{f.title}</div>
+                                      {f.is_from_db && (
+                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                            <span style={{ color: 'var(--accent-secondary)', background: 'rgba(14,203,129,0.1)', padding: '1px 6px', borderRadius: '4px', fontSize: '0.6rem', fontWeight: 600 }}>DATABASE</span>
+                                            <span style={{ fontSize: '0.6rem', color: 'rgba(255,255,255,0.3)' }}>{formatTs(f.timestamp)}</span>
+                                         </div>
+                                      )}
+                                   </div>
+                                </div>
+                                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>
+                                   {f.description}
+                                </p>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '0.75rem', borderTop: '1px solid rgba(255,255,255,0.03)' }}>
+                                   <div style={{ display: 'flex', gap: '0.4rem' }}>
+                                      {itemSummaries[f.link] && <span style={{ color: 'var(--accent-secondary)', background: 'rgba(14,203,129,0.1)', padding: '2px 6px', borderRadius: '4px', fontSize: '0.6rem' }}><Sparkles size={10} /> Analyzed</span>}
+                                   </div>
+                                   <div style={{ color: 'var(--accent-primary)', fontSize: '0.7rem', fontWeight: 600 }}>Preview <ChevronRight size={12} /></div>
+                                </div>
+                             </div>
+                          ))
+                       ) : (
+                          <div style={{ gridColumn: '1/-1', textAlign: 'center', padding: '10rem 2rem', opacity: 0.3 }}>
+                             <Globe size={48} style={{ marginBottom: '1.5rem' }} />
+                             <h3>No data pipelines active</h3>
+                             <p>Select a source to begin scouting</p>
+                          </div>
+                       )}
+                    </div>
+                 )}
+
+                 {/* 🔮 LOCALIZED POPUP (Absolute within Feed) */}
+                 {previewFinding && (
+                    <div className="animate-fade-in" style={{
+                      position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+                      background: 'rgba(13,17,23,0.92)', backdropFilter: 'blur(8px)',
+                      zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      padding: '1.5rem'
+                    }} onClick={() => setPreviewFinding(null)}>
+                       <div className="glass-panel animate-slide-up" style={{
+                          width: '100%', maxWidth: '780px', maxHeight: '100%', 
+                          display: 'flex', flexDirection: 'column', background: '#0d1117', 
+                          border: '1px solid rgba(255,255,255,0.1)', borderRadius: '20px', 
+                          overflow: 'hidden', pointerEvents: 'auto', boxShadow: '0 0 30px rgba(0,0,0,0.5)'
+                       }} onClick={e => e.stopPropagation()}>
+                          {/* Local Header */}
+                          <div style={{ padding: '1rem 1.5rem', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <div style={{ width: '32px', height: '32px', background: 'rgba(0,209,255,0.1)', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00d1ff' }}>
+                                  <Search size={18} />
+                                </div>
+                                <h3 style={{ margin: 0, fontSize: '1rem' }}>Finding Insight</h3>
+                             </div>
+                             <button onClick={() => setPreviewFinding(null)} style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#fff', padding: '0.35rem', borderRadius: '50%', cursor: 'pointer' }}>
+                                <X size={16} />
+                             </button>
+                          </div>
+                          {/* Body */}
+                          <div style={{ padding: '1.25rem', overflowY: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                <h2 style={{ margin: 0, fontSize: '1.35rem', color: '#fff' }}>{previewFinding.title}</h2>
+                                <div style={{ display: 'flex', gap: '1rem', color: 'rgba(255,255,255,0.4)', fontSize: '0.75rem' }}>
+                                   <span style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}><Clock size={12} /> {formatTs(previewFinding.timestamp)}</span>
+                                   <a href={previewFinding.link} target="_blank" rel="noreferrer" style={{ color: 'var(--accent-primary)', textDecoration: 'none' }}>Source <ExternalLink size={10} /></a>
+                                </div>
+                             </div>
+                             <div style={{ background: 'rgba(255,255,255,0.02)', padding: '1rem', borderRadius: '12px', fontSize: '0.85rem', color: 'rgba(255,255,255,0.6)' }}>
+                                {previewFinding.description}
+                             </div>
+                             {itemSummaries[previewFinding.link] ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <h4 style={{ margin: 0, color: 'var(--accent-primary)', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                         <Sparkles size={16} /> AI Quantitative Insight
+                                      </h4>
+                                      <button className="btn-text" onClick={() => summarizeFinding(previewFinding!, true)} disabled={isSummarizing === previewFinding.link} style={{ padding: 0, fontSize: '0.65rem' }}>
+                                         <RefreshCw size={10} className={isSummarizing === previewFinding.link ? 'spin' : ''} /> {isSummarizing === previewFinding.link ? 'ANALYZING...' : 'RE-ANALYZE'}
+                                      </button>
+                                   </div>
+
+                                   {/* 📊 SCORES DASHBOARD */}
+                                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                       {(() => {
+                                          const text = itemSummaries[previewFinding.link];
+                                          const featMatch = text.match(/Implementation Feasibility.*?(\d+)/i);
+                                          const alphaMatch = text.match(/Alpha Potential.*?(\d+)/i);
+                                          const featScore = featMatch ? parseInt(featMatch[1]) : 0;
+                                          const alphaScore = alphaMatch ? parseInt(alphaMatch[1]) : 0;
+                                          
+                                          const getScoreColor = (s: number) => s > 75 ? '#0ecb81' : s > 45 ? '#f0b90b' : '#f6465d';
+                                          
+                                          return (
+                                             <>
+                                                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                                      <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', fontWeight: 700 }}>IMPLEMENTATION</span>
+                                                      <span style={{ fontSize: '0.8rem', fontWeight: 800, color: getScoreColor(featScore) }}>{featScore}/100</span>
+                                                   </div>
+                                                   <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                                                      <div style={{ width: `${featScore}%`, height: '100%', background: getScoreColor(featScore), transition: 'width 1s ease-out' }}></div>
+                                                   </div>
+                                                </div>
+                                                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '1rem', borderRadius: '14px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                                                      <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.4)', fontWeight: 700 }}>ALPHA POTENTIAL</span>
+                                                      <span style={{ fontSize: '0.8rem', fontWeight: 800, color: getScoreColor(alphaScore) }}>{alphaScore}/100</span>
+                                                   </div>
+                                                   <div style={{ height: '4px', background: 'rgba(255,255,255,0.05)', borderRadius: '2px', overflow: 'hidden' }}>
+                                                      <div style={{ width: `${alphaScore}%`, height: '100%', background: getScoreColor(alphaScore), transition: 'width 1s ease-out' }}></div>
+                                                   </div>
+                                                </div>
+                                             </>
+                                          );
+                                       })()}
+                                   </div>
+
+                                   <div style={{ 
+                                      padding: '1.25rem', background: 'rgba(0,122,255,0.04)', borderRadius: '16px', 
+                                      border: '1px solid rgba(0,122,255,0.1)', fontSize: '0.95rem', lineHeight: '1.6', 
+                                      color: '#e0e0e0', whiteSpace: 'pre-wrap' 
+                                   }}>
+                                      {itemSummaries[previewFinding.link]}
+                                   </div>
+                                </div>
+                             ) : (
+                                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '16px' }}>
+                                   <Brain size={32} style={{ opacity: 0.1, marginBottom: '1rem' }} />
+                                   <button className="btn-primary" onClick={() => summarizeFinding(previewFinding!)} disabled={isSummarizing === previewFinding.link} style={{ padding: '0.75rem 2rem', fontSize: '0.85rem' }}>
+                                      {isSummarizing === previewFinding.link ? 'Analyzing...' : 'Start AI Analysis'}
+                                   </button>
+                                </div>
+                             )}
+                          </div>
+                          {/* Footer */}
+                          <div style={{ padding: '1rem 1.25rem', borderTop: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+                             <button className="btn-primary" onClick={() => archiveToBrain(previewFinding!)} 
+                                disabled={isArchiving === previewFinding.link || archivedLinks.has(previewFinding.link) || !itemSummaries[previewFinding.link]}
+                                style={{ 
+                                  padding: '0.5rem 1.5rem', fontSize: '0.85rem',
+                                  background: archivedLinks.has(previewFinding.link) ? '#22c55e' : 'var(--accent-primary)',
+                                  borderColor: archivedLinks.has(previewFinding.link) ? '#22c55e' : 'var(--accent-primary)'
+                                }}
+                             >
+                                {archivedLinks.has(previewFinding.link) ? 'Saved to Brain' : 'Archive Result'}
+                             </button>
+                          </div>
+                       </div>
+                    </div>
+                 )}
+              </div>
+           </div>
         </div>
       )}
 
-      {/* Summary Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-        {[
-          { label: 'Active Strategies', value: activeCount, icon: <TrendingUp size={20} />, color: 'var(--profit-color)' },
-          { label: 'Decayed', value: decayedCount, icon: <TrendingDown size={20} />, color: decayedCount > 0 ? 'var(--loss-color)' : 'var(--text-muted)' },
-          { label: 'Agents Running', value: runningAgents, icon: <Activity size={20} />, color: runningAgents > 0 ? '#faad14' : 'var(--text-muted)' },
-          { label: 'Cycles Run', value: cycleHistory.length, icon: <GitBranch size={20} />, color: 'var(--accent-primary)' },
-        ].map((s, i) => (
-          <div key={i} className="glass-panel" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '0.3rem' }}>{s.label}</p>
-              <h2 style={{ margin: 0, color: s.color }}>{s.value}</h2>
-            </div>
-            <div style={{ color: s.color }}>{s.icon}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '0', borderBottom: '1px solid var(--border-color)' }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setActiveTab(t.id)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.6rem 1.2rem', fontSize: '0.9rem',
-              color: activeTab === t.id ? 'var(--accent-primary)' : 'var(--text-muted)',
-              borderBottom: activeTab === t.id ? '2px solid var(--accent-primary)' : '2px solid transparent',
-              fontWeight: activeTab === t.id ? 600 : 400 }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab: Overview */}
       {activeTab === 'overview' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-          {/* Agent Status Grid */}
-          <div className="glass-panel">
-            <h3 style={{ margin: '0 0 1rem' }}>Agent Status</h3>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem' }}>
-              {['sentiment_agent', 'data_agent', 'alpha_agent', 'backtest_agent', 'strategy_manager'].map(name => (
-                <AgentCard key={name} name={name.replace('_', ' ').replace('_', ' ')} status={agentStatuses[name]} />
-              ))}
-            </div>
-          </div>
-
-          {/* Capital Allocations */}
-          <div className="glass-panel">
-            <h3 style={{ margin: '0 0 1rem' }}>Capital Allocations</h3>
-            {allocations.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No active strategies to allocate capital.</p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                {allocations.map(a => (
-                  <div key={a.strategy_key} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                    <span style={{ fontSize: '0.82rem', color: 'var(--text-main)', width: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{a.strategy_key}</span>
-                    <div style={{ flex: 1, height: '8px', background: 'var(--bg-dark)', borderRadius: '4px', overflow: 'hidden' }}>
-                      <div style={{ width: `${(a.weight * 100).toFixed(1)}%`, height: '100%', background: 'var(--accent-primary)', borderRadius: '4px' }} />
-                    </div>
-                    <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', width: '50px', textAlign: 'right' }}>{(a.weight * 100).toFixed(1)}%</span>
-                    <span style={{ fontSize: '0.82rem', color: 'var(--profit-color)', width: '90px', textAlign: 'right' }}>${a.capital_usdt.toFixed(2)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Recent Decay Events */}
-          <div className="glass-panel">
-            <h3 style={{ margin: '0 0 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <AlertTriangle size={16} color="var(--loss-color)" /> Recent Decay Events
-            </h3>
-            {decayEvents.length === 0 ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No decay events recorded.</p>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                <thead>
-                  <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
-                    <th style={{ padding: '0.5rem 0', fontWeight: 500, textAlign: 'left' }}>Strategy</th>
-                    <th style={{ padding: '0.5rem 0', fontWeight: 500 }}>Decay Score</th>
-                    <th style={{ padding: '0.5rem 0', fontWeight: 500 }}>Consec. Losses</th>
-                    <th style={{ padding: '0.5rem 0', fontWeight: 500 }}>Action</th>
-                    <th style={{ padding: '0.5rem 0', fontWeight: 500, textAlign: 'right' }}>Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {decayEvents.slice(0, 10).map((e, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '0.6rem 0', color: 'var(--text-main)' }}>{e.strategy_key}</td>
-                      <td style={{ padding: '0.6rem 0', textAlign: 'center', color: e.decay_score > 70 ? 'var(--loss-color)' : '#faad14', fontWeight: 600 }}>{e.decay_score.toFixed(1)}</td>
-                      <td style={{ padding: '0.6rem 0', textAlign: 'center', color: 'var(--text-main)' }}>{e.consecutive_losses}</td>
-                      <td style={{ padding: '0.6rem 0', textAlign: 'center' }}>
-                        <span style={{ fontSize: '0.75rem', background: 'rgba(246,70,93,0.15)', color: 'var(--loss-color)', padding: '0.15rem 0.5rem', borderRadius: '3px' }}>{e.action}</span>
-                      </td>
-                      <td style={{ padding: '0.6rem 0', textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{new Date(e.timestamp).toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Tab: Strategies */}
-      {activeTab === 'strategies' && (
-        <div className="glass-panel">
-          {strategies.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No strategies registered yet. Trigger a generation cycle to start.</p>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500, textAlign: 'left' }}>Strategy Key</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Sharpe</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Max DD</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Win Rate</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Mutations</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Status</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500, textAlign: 'right' }}>Approved</th>
-                </tr>
-              </thead>
-              <tbody>
-                {strategies.map((s, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td style={{ padding: '0.75rem 0', color: 'var(--text-main)', fontFamily: 'monospace', fontSize: '0.8rem' }}>{s.strategy_key}</td>
-                    <td style={{ padding: '0.75rem 0', textAlign: 'center', color: (s.backtest_metrics?.sharpe ?? 0) > 1.5 ? 'var(--profit-color)' : 'var(--loss-color)', fontWeight: 600 }}>
-                      {(s.backtest_metrics?.sharpe ?? 0).toFixed(2)}
-                    </td>
-                    <td style={{ padding: '0.75rem 0', textAlign: 'center', color: 'var(--text-main)' }}>
-                      {((s.backtest_metrics?.max_drawdown ?? 0) * 100).toFixed(1)}%
-                    </td>
-                    <td style={{ padding: '0.75rem 0', textAlign: 'center', color: 'var(--text-main)' }}>
-                      {((s.backtest_metrics?.win_rate ?? 0) * 100).toFixed(1)}%
-                    </td>
-                    <td style={{ padding: '0.75rem 0', textAlign: 'center', color: 'var(--text-muted)' }}>{s.mutation_count}</td>
-                    <td style={{ padding: '0.75rem 0', textAlign: 'center' }}>
-                      <span style={{ color: STATUS_COLOR[s.status], fontWeight: 600, fontSize: '0.8rem' }}>● {s.status}</span>
-                    </td>
-                    <td style={{ padding: '0.75rem 0', textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                      {new Date(s.approved_at).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
-
-      {/* Tab: Sentiment */}
-      {activeTab === 'sentiment' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {sentimentScores.length === 0 ? (
-            <div className="glass-panel">
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No sentiment data yet. Quant engine computes scores every 15 minutes.</p>
-            </div>
-          ) : (
-            sentimentScores.map(s => (
-              <div key={s.symbol} className="glass-panel" style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
-                <div style={{ minWidth: '100px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--text-main)' }}>{s.symbol}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{new Date(s.timestamp).toLocaleString()}</div>
-                </div>
-                <ScoreGauge score={s.score} />
-                <div style={{ flex: 1, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
-                  <div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Funding Rate</div>
-                    <div style={{ fontWeight: 600, color: s.funding_rate > 0 ? 'var(--loss-color)' : 'var(--profit-color)' }}>
-                      {(s.funding_rate * 100).toFixed(4)}%
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>OI Change</div>
-                    <div style={{ fontWeight: 600, color: s.oi_change_pct > 0 ? 'var(--profit-color)' : 'var(--loss-color)' }}>
-                      {s.oi_change_pct.toFixed(2)}%
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Funding Component</div>
-                    <div style={{ fontWeight: 600, color: 'var(--text-main)' }}>{(s.components?.funding_component ?? 0).toFixed(1)}</div>
-                  </div>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {/* Tab: Cycle History */}
-      {activeTab === 'history' && (
-        <div className="glass-panel">
-          {cycleHistory.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', margin: 0 }}>No cycles run yet.</p>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-              <thead>
-                <tr style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border-color)' }}>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500, textAlign: 'left' }}>Cycle ID</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Generated</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Approved</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Rejected</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Errors</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500 }}>Duration</th>
-                  <th style={{ padding: '0.75rem 0', fontWeight: 500, textAlign: 'right' }}>Started</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cycleHistory.map((c, i) => {
-                  const duration = c.completed_at && c.started_at
-                    ? ((new Date(c.completed_at).getTime() - new Date(c.started_at).getTime()) / 1000).toFixed(0) + 's'
-                    : '—';
-                  return (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                      <td style={{ padding: '0.75rem 0', color: 'var(--text-muted)', fontFamily: 'monospace', fontSize: '0.75rem' }}>{c.cycle_id?.slice(0, 8)}…</td>
-                      <td style={{ padding: '0.75rem 0', textAlign: 'center', color: 'var(--text-main)' }}>{c.strategies_generated}</td>
-                      <td style={{ padding: '0.75rem 0', textAlign: 'center', color: 'var(--profit-color)', fontWeight: 600 }}>{c.strategies_approved}</td>
-                      <td style={{ padding: '0.75rem 0', textAlign: 'center', color: c.strategies_rejected > 0 ? 'var(--loss-color)' : 'var(--text-muted)' }}>{c.strategies_rejected}</td>
-                      <td style={{ padding: '0.75rem 0', textAlign: 'center', color: c.errors?.length > 0 ? 'var(--loss-color)' : 'var(--text-muted)' }}>{c.errors?.length ?? 0}</td>
-                      <td style={{ padding: '0.75rem 0', textAlign: 'center', color: 'var(--text-muted)' }}>{duration}</td>
-                      <td style={{ padding: '0.75rem 0', textAlign: 'right', color: 'var(--text-muted)', fontSize: '0.78rem' }}>{new Date(c.started_at).toLocaleString()}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.75rem' }}>
+           {['scout_agent', 'alpha_agent', 'backtest_agent', 'strategy_manager', 'sentiment_agent', 'data_agent'].map(name => (
+             <AgentCard key={name} name={name} status={agentStatuses[name]} QUANT_URL={QUANT_URL} onRefresh={fetchAll} />
+           ))}
         </div>
       )}
     </div>

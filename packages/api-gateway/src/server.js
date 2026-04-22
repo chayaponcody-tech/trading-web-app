@@ -10,9 +10,16 @@ import { BinanceAdapter } from '../../exchange-connector/src/BinanceAdapter.js';
 import { BotManager } from '../../bot-engine/src/BotManager.js';
 import { PortfolioManager } from '../../bot-engine/src/PortfolioManager.js';
 import { 
-  loadBinanceConfig, getAllBots, getAllFleets, getSetting, saveSetting, upsertFleet 
+  loadBinanceConfig, getAllBots, getAllFleets, getSetting, saveSetting, upsertFleet,
+  logTokenUsage
 } from '../../data-layer/src/index.js';
 import { PORT } from '../../shared/config.js';
+import { setUsageLogger } from '../../ai-agents/src/index.js';
+
+// Initialize AI Cost Logger
+setUsageLogger((usage) => {
+  logTokenUsage(usage.feature, usage.model, usage);
+});
 
 import { createBotRoutes }       from './routes/botRoutes.js';
 import { createAiRoutes }        from './routes/aiRoutes.js';
@@ -25,6 +32,8 @@ import { createPineScriptRoutes } from './routes/pineScriptRoutes.js';
 import { createStrategyRoutes }  from './routes/strategyRoutes.js';
 import { createMarketRoutes }    from './routes/marketRoutes.js';
 import { createResearchRoutes }  from './routes/researchRoutes.js';
+import { createIndicatorRoutes } from './routes/indicatorRoutes.js';
+import { createCostRoutes }      from './routes/costRoutes.js';
 import { errorHandler }          from './middleware/errorHandler.js';
 
 import { setupSwagger }          from './swagger.js';
@@ -38,18 +47,17 @@ setupSwagger(app);
 // ─── Initialise Exchange + Bot Engine ─────────────────────────────────────────
 const binanceConfig = loadBinanceConfig();
 const exchange = binanceConfig.apiKey && binanceConfig.apiSecret
-  ? new BinanceAdapter(binanceConfig.apiKey, binanceConfig.apiSecret)
+  ? new BinanceAdapter(binanceConfig.apiKey, binanceConfig.apiSecret, { useTestnet: true })
   : null;
 
-// Live (production) exchange — useTestnet: false, use live API keys if configured
+// Live (production) exchange — useTestnet: false. If keys missing, it only supports Public Data.
 const liveKey = binanceConfig.liveApiKey || binanceConfig.apiKey;
 const liveSecret = binanceConfig.liveApiSecret || binanceConfig.apiSecret;
-const exchangeLive = liveKey && liveSecret
-  ? new BinanceAdapter(liveKey, liveSecret, { useTestnet: false })
-  : null;
+const exchangeLive = new BinanceAdapter(liveKey || '', liveSecret || '', { useTestnet: false });
 
 const botManager = new BotManager(exchange, binanceConfig);
 botManager.setLiveExchange(exchangeLive);
+
 
 // ─── Multi-Fleet Orchestration ────────────────────────────────────────────────
 const portfolioManagers = new Map();
@@ -106,9 +114,10 @@ if (exchange) {
 }
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
+console.log('🛤️ [Server] Mounting Routes...');
 app.use('/api/bots',      createBotRoutes(botManager));
 app.use('/api/ai',        createAiRoutes(botManager, binanceConfig));
-app.use('/api/binance',   createBinanceRoutes(botManager, Array.from(portfolioManagers.values())[0], binanceConfig)); // Fallback for binance routes
+app.use('/api/binance',   createBinanceRoutes(botManager, Array.from(portfolioManagers.values())[0], binanceConfig)); 
 app.use('/api/config',    createConfigRoutes(botManager, portfolioManagers));
 app.use('/api/portfolio', createPortfolioRoutes(portfolioManagers, { botManager, exchange }));
 app.use('/api/wallet',    createWalletRoutes());
@@ -117,6 +126,9 @@ app.use('/api/pine-script', createPineScriptRoutes(exchange));
 app.use('/api/strategies', createStrategyRoutes(exchange));
 app.use('/api/market',     createMarketRoutes(exchange));
 app.use('/api/research',   createResearchRoutes());
+app.use('/api/indicators', createIndicatorRoutes());
+app.use('/api/cost',       createCostRoutes());
+console.log('✅ [Server] All routes mounted.');
 
 
 // Backwards-compat aliases (legacy frontend calls these paths)

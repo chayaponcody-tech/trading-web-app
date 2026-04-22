@@ -4,7 +4,7 @@ import { API, type Bot, type BinanceKeys } from './types';
 // ─── Custom Hook: Trading Data ────────────────────────────────────────────────
 // Centralizes all polling and data fetching logic.
 
-export function useTradingData() {
+export function useTradingData({ isRealMode = false }: { isRealMode?: boolean } = {}) {
   const [bots, setBots] = useState<Bot[]>([]);
   const [fleets, setFleets] = useState<any[]>([]);
   const [accountInfo, setAccountInfo] = useState<any>(null);
@@ -24,7 +24,11 @@ export function useTradingData() {
     try {
       const res = await fetch(`${API}/api/forward-test/status`);
       const data = await res.json();
-      setBots(Array.isArray(data) ? data.filter((b: Bot) => b.config.exchange === 'binance_testnet') : []);
+      if (isRealMode) {
+        setBots(Array.isArray(data) ? data.filter((b: Bot) => b.config.exchange === 'binance_live') : []);
+      } else {
+        setBots(Array.isArray(data) ? data.filter((b: Bot) => b.config.exchange !== 'binance_live') : []);
+      }
     } catch {}
   };
 
@@ -37,9 +41,10 @@ export function useTradingData() {
 
   const fetchAccount = async () => {
     try {
+      const basePath = isRealMode ? '/api/binance/live' : '/api/binance';
       const [accRes, riskRes] = await Promise.all([
-        fetch(`${API}/api/binance/account`),
-        fetch(`${API}/api/binance/position-risk`),
+        fetch(`${API}${basePath}/account`),
+        fetch(`${API}${basePath}/position-risk`),
       ]);
       if (accRes.ok && riskRes.ok) {
         const acc = await accRes.json();
@@ -74,8 +79,21 @@ export function useTradingData() {
   const fetchHistory = async () => {
     setFetchingHistory(true);
     try {
-      const res = await fetch(`${API}/api/binance/history`);
-      if (res.ok) setTradeHistory(await res.json());
+      const endpoint = isRealMode ? '/api/binance/live/history' : '/api/binance/history';
+      const res = await fetch(`${API}${endpoint}`);
+      if (res.ok) {
+        const data = await res.json();
+        // Standardize format (Live returns CCXT trades, system returns DB rows)
+        const standardized = data.map((t: any) => ({
+          timestamp: t.timestamp || t.exitTime || Date.now(),
+          symbol: t.symbol,
+          side: (t.side || t.type || 'N/A').toUpperCase(),
+          price: t.price || t.exitPrice || 0,
+          amount: t.amount || t.quantity || 0,
+          realizedPnl: t.realizedPnl !== undefined ? t.realizedPnl : (t.pnl || 0)
+        }));
+        setTradeHistory(standardized);
+      }
     } catch {} finally { setFetchingHistory(false); }
   };
 
@@ -87,6 +105,11 @@ export function useTradingData() {
   };
 
   useEffect(() => {
+    // Clear old data when mode changes to prevent showing stale info
+    setBots([]);
+    setAccountInfo(null);
+    setAnalyticsData(null);
+
     fetchStatus();
     fetchFleets();
     fetchBinanceConfig();
@@ -103,7 +126,7 @@ export function useTradingData() {
       if (activeTab === 'analytics') fetchAnalytics();
     }, 5000);
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [activeTab]);
+  }, [activeTab, isRealMode]);
 
   return {
     bots, setBots,

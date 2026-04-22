@@ -85,6 +85,56 @@ export default function IndicatorManagement() {
   const [indicators, setIndicators] = useState<IndicatorConfig[]>(DEFAULT_INDICATORS);
   const [selectedId, setSelectedId] = useState<string>('hob');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const API_BASE = '/api/indicators';
+
+  React.useEffect(() => {
+    fetchIndicators();
+  }, []);
+
+  const fetchIndicators = async () => {
+    try {
+      const res = await fetch(API_BASE);
+      if (res.ok) {
+        const data = await res.json();
+        // Merge with defaults to ensure all required fields exist
+        if (data && data.length > 0) {
+          const merged = DEFAULT_INDICATORS.map(def => {
+             const saved = data.find((d: any) => d.id === def.id);
+             return saved ? { ...def, ...saved } : def;
+          });
+          setIndicators(merged);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch indicators', e);
+    }
+  };
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      await Promise.all(
+        indicators.map(ind => 
+          fetch(`${API_BASE}/${ind.id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              enabled: ind.enabled, 
+              params: ind.params, 
+              styles: ind.styles 
+            })
+          })
+        )
+      );
+      alert('Indicators saved successfully! Changes will reflect in Market Analysis.');
+    } catch (e) {
+      alert('Failed to save indicators:' + (e as Error).message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const selected = indicators.find(i => i.id === selectedId) || indicators[0];
 
@@ -235,11 +285,17 @@ export default function IndicatorManagement() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button className="btn-outline" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <RefreshCw size={16} /> Reset
+              <button className="btn-outline" onClick={fetchIndicators} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <RefreshCw size={16} className={isSaving ? 'animate-spin' : ''} /> Reset
               </button>
-              <button className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0 1.5rem' }}>
-                <Save size={16} /> Save Changes
+              <button 
+                className="btn-primary" 
+                onClick={handleSave}
+                disabled={isSaving}
+                style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0 1.5rem', opacity: isSaving ? 0.7 : 1 }}
+              >
+                {isSaving ? <RefreshCw size={16} className="animate-spin" /> : <Save size={16} />}
+                {isSaving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>

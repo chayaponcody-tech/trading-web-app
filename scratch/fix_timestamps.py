@@ -1,0 +1,10 @@
+import sqlite3
+conn = sqlite3.connect('trading_app.db')
+cursor = conn.cursor()
+cursor.execute("UPDATE sentiment_scores SET timestamp = replace(timestamp, '+00:00', 'Z') WHERE timestamp LIKE '%+00:00'")
+conn.commit()
+print(f'Fixed {cursor.rowcount} rows')
+cursor.execute("UPDATE sentiment_news SET timestamp = replace(timestamp, '+00:00', 'Z') WHERE timestamp LIKE '%+00:00'")
+conn.commit()
+print(f'Fixed {cursor.rowcount} news rows')
+conn.close()

@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import type { Bot } from '../types';
-import { formatPrice } from '../types';
+import { formatPrice, normalizeSymbol } from '../types';
 
 interface Props {
   activePositions: any[];
   bots: any[];
   fleets: any[];
   onManualClose: (symbol: string, type: string, qty: number) => void;
+  onAdopt: (symbol: string) => void;
   onRefresh: () => void;
-  onViewChart: (symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number) => void;
+  onViewChart: (symbol: string, interval: string, price: number, entryTime: string | number, type: string, reason: string, strategy: string, gridUpper?: number, gridLower?: number, tp?: number, sl?: number) => void;
 }
 
-export default function PositionsTab({ activePositions, bots, fleets, onManualClose, onRefresh, onViewChart }: Props) {
+export default function PositionsTab({ activePositions, bots, fleets, onManualClose, onAdopt, onRefresh, onViewChart }: Props) {
   const [posSortBy, setPosSortBy] = useState<'symbol' | 'pnl' | 'roe'>('symbol');
 
   let sorted = [...activePositions];
@@ -29,8 +30,6 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
     sorted.sort((a, b) => a.symbol.localeCompare(b.symbol));
   }
 
-  // Normalize symbol for matching (SWARMS/USDT:USDT → SWARMSUSDT)
-  const normalizeSymbol = (s: string) => s.replace('/', '').replace(':USDT', '').replace(':USD', '').toUpperCase();
 
   // --- Grouping Logic ---
   const groupedPositions: { [fleetId: string]: { fleetName: string, list: any[] } } = {};
@@ -101,6 +100,7 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
                   const leverage = parseFloat(p.leverage);
                   const marginValue = (Math.abs(amt) * entryPrice) / leverage;
                   const roe = (upnl / (marginValue || 1)) * 100;
+                  const rawRoe = ((markPrice - entryPrice) / entryPrice) * 100 * (side === 'LONG' ? 1 : -1);
                   
                   const linkedBot = bots.find(b => normalizeSymbol(b.config.symbol) === normalizeSymbol(p.symbol));
                   const fleetNameTag = fleetId === 'manual' ? 'External' : (fleets.find(f => f.id === fleetId)?.name || 'Managed');
@@ -114,6 +114,9 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
                   const analyticalReason = linkedBot?.config?.aiReason || linkedBot?.aiReason;
                   const technicalReason = botPos?.entryReason || 'Technical Analysis Entry';
                   const entryReason = analyticalReason ? analyticalReason : technicalReason;
+
+                  const finalTp = botPos?.dynamicTp || tpPrice;
+                  const finalSl = botPos?.dynamicSl || slPrice;
 
                   return (
                     <tr key={`${fleetId}-${p.symbol}`} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
@@ -131,7 +134,9 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
                                 entryReason,
                                 linkedBot?.config?.strategy || 'MANUAL',
                                 linkedBot?.config?.gridUpper,
-                                linkedBot?.config?.gridLower
+                                linkedBot?.config?.gridLower,
+                                finalTp,
+                                finalSl
                             )}
                             style={{ background: 'rgba(250,173,20,0.1)', border: 'none', color: '#faad14', padding: '2px 6px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.65rem' }}>
                             📈
@@ -150,14 +155,45 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
                         <div style={{ fontSize: '0.8rem', color: '#faad14' }}>M: {formatPrice(markPrice)}</div>
                       </td>
                       <td style={{ padding: '1rem' }}>
-                        <span style={{ fontSize: '0.7rem', fontWeight: 'bold', background: 'rgba(250,173,20,0.1)', color: '#faad14', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                          {linkedBot?.config?.strategy || 'MANUAL'}
+                        <span style={{ 
+                          fontSize: '0.7rem', 
+                          fontWeight: 'bold', 
+                          background: linkedBot?.config?.isGuardian ? 'rgba(0,209,255,0.1)' : 'rgba(250,173,20,0.1)', 
+                          color: linkedBot?.config?.isGuardian ? '#00d1ff' : '#faad14', 
+                          padding: '0.2rem 0.5rem', 
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          width: 'fit-content'
+                        }}>
+                          {linkedBot?.config?.isGuardian && <span style={{ fontSize: '0.9rem' }}>🛡️</span>}
+                          {linkedBot?.config?.isGuardian ? 'GUARDIAN' : (linkedBot?.config?.strategy || 'MANUAL')}
                         </span>
                       </td>
                       <td style={{ padding: '1rem' }}>
-                        {tpPrice > 0 && <div style={{ fontSize: '0.75rem', color: '#0ecb81', fontWeight: 'bold' }}>TP: {formatPrice(tpPrice)}</div>}
-                        {slPrice > 0 && <div style={{ fontSize: '0.75rem', color: '#f6465d', fontWeight: 'bold' }}>SL: {formatPrice(slPrice)}</div>}
-                        {!tpPrice && !slPrice && <span style={{ opacity: 0.3 }}>-</span>}
+                        {(() => {
+                           const isAiAdjusted = !!(botPos?.dynamicTp || botPos?.dynamicSl);
+                           
+                           if (!finalTp && !finalSl) return <span style={{ opacity: 0.3 }}>-</span>;
+
+                           return (
+                             <>
+                               {finalTp > 0 && <div style={{ fontSize: '0.75rem', color: isAiAdjusted ? '#faad14' : '#0ecb81', fontWeight: 'bold' }}>
+                                 {isAiAdjusted ? '✨ TP: ' : 'TP: '}{formatPrice(finalTp)} <span style={{ fontSize: '0.6rem', opacity: 0.7, fontWeight: 'normal' }}>(Raw: {((Math.abs(finalTp - entryPrice)/entryPrice)*100).toFixed(1)}%)</span>
+                               </div>}
+                               {finalSl > 0 && <div style={{ fontSize: '0.75rem', color: isAiAdjusted ? '#faad14' : '#f6465d', fontWeight: 'bold' }}>
+                                 {isAiAdjusted ? '✨ SL: ' : 'SL: '}{formatPrice(finalSl)} <span style={{ fontSize: '0.6rem', opacity: 0.7, fontWeight: 'normal' }}>(Raw: {((Math.abs(finalSl - entryPrice)/entryPrice)*100).toFixed(1)}%)</span>
+                               </div>}
+                               
+                               {linkedBot?.lastAiCheck && (
+                                 <div style={{ fontSize: '0.6rem', color: '#666', marginTop: '4px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '2px' }}>
+                                   ⏱️ AI: {new Date(linkedBot.lastAiCheck).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' })}
+                                 </div>
+                               )}
+                             </>
+                           );
+                        })()}
                       </td>
                       <td style={{ padding: '1rem' }}>
                         <div style={{ fontSize: '0.65rem', color: '#faad14', fontStyle: 'italic', maxWidth: '180px', lineHeight: '1.4' }}>
@@ -165,10 +201,18 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
                         </div>
                       </td>
                       <td style={{ padding: '1rem', color: roe >= 0 ? '#0ecb81' : '#f6465d' }}>
-                        <span style={{ fontWeight: 'bold', fontSize: '1rem' }}>{roe.toFixed(2)}%</span>
+                        <div style={{ fontWeight: 'bold', fontSize: '1rem' }}>{roe.toFixed(2)}%</div>
+                        <div style={{ fontSize: '0.65rem', opacity: 0.7 }}>Raw: {rawRoe.toFixed(2)}%</div>
                       </td>
                       <td style={{ padding: '1rem', fontWeight: 'bold', color: upnl >= 0 ? '#0ecb81' : '#f6465d' }}>{upnl.toFixed(4)} USDT</td>
                       <td style={{ padding: '1rem', textAlign: 'right' }}>
+                        {fleetId === 'manual' && (
+                          <button 
+                            onClick={() => onAdopt(p.symbol)} 
+                            style={{ background: 'rgba(0,209,255,0.1)', color: '#00d1ff', border: '1px solid #00d1ff', padding: '0.4rem 0.8rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 'bold', marginRight: '0.5rem' }}>
+                            🛡️ Adopt with AI
+                          </button>
+                        )}
                         <button onClick={() => onManualClose(p.symbol, side, Math.abs(amt))} style={{ background: '#f6465d', color: '#fff', border: 'none', padding: '0.5rem 1rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}>Close</button>
                       </td>
                     </tr>

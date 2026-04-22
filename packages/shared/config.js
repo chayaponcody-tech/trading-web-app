@@ -23,7 +23,7 @@ export const DEFAULT_BOT_CONFIG = {
   slPercent: 1.0,
   leverage: 10,
   positionSizeUSDT: 100,
-  exchange: 'binance_testnet',
+  exchange: process.env.BINANCE_USE_TESTNET === 'false' ? 'binance_live' : 'binance_testnet',
   durationMinutes: 0,
   aiCheckInterval: 30,
   useReflection: false,

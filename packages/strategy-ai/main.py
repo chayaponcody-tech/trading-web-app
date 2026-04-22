@@ -396,9 +396,17 @@ async def strategy_analyze(req: AnalyzeRequest):
 
     final_signal = raw_signal if confidence >= CONFIDENCE_THRESHOLD else "NONE"
 
+    # Enhanced breakdown for the log
+    rsi = features.get("rsi", 0)
+    bb_pos = features.get("bb_position", 0)
+    ema_cross = features.get("ema_cross", 0)
+    vol = features.get("volatility", 0)
+    
+    breakdown = f"[RSI:{rsi:.1f} BB:{bb_pos:.2f} EMA:{ema_cross:.4f} Vol:{vol:.4f}]"
+
+    atr_str = f"{atr_value:.4f}" if atr_value else "N/A"
     log.info(
-        f"🧠 [{req.symbol}] strategy={req.strategy} signal={raw_signal}→{final_signal} "
-        f"confidence={confidence:.0%} regime={regime} atr={atr_value:.4f if atr_value else 'N/A'} | {reason}"
+        f"🧠 [{req.symbol}] {raw_signal}→{final_signal} conf={confidence:.0%} {breakdown} | {reason}"
     )
 
     return AnalyzeResponse(
@@ -630,6 +638,12 @@ async def strategy_optimize(req: OptimizeRequest):
     lows = req.lows
     volumes = req.volumes
 
+    # Length Validation
+    lengths = [len(closes), len(highs), len(lows), len(volumes)]
+    if len(set(lengths)) > 1:
+        log.error(f"❌ Array length mismatch: C={len(closes)}, H={len(highs)}, L={len(lows)}, V={len(volumes)}")
+        raise HTTPException(status_code=400, detail=f"Array length mismatch: {lengths}")
+
     log.info(f"[Optimize/Optuna] strategy={req.strategy} candles={len(closes)} trials={req.n_trials}")
 
     def objective(trial: optuna.Trial) -> float:
@@ -703,6 +717,12 @@ async def strategy_optimize_vectorbt(req: VbtOptimizeRequest):
         strategy = registry.get(req.strategy)
     except KeyError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Length Validation
+    lengths = [len(req.closes), len(req.highs), len(req.lows), len(req.volumes)]
+    if len(set(lengths)) > 1:
+        log.error(f"❌ VBT Array length mismatch: C={len(req.closes)}, H={len(req.highs)}, L={len(req.lows)}, V={len(req.volumes)}")
+        raise HTTPException(status_code=400, detail=f"Array length mismatch: {lengths}")
 
     log.info(
         f"[Optimize/VBT] strategy={req.strategy} candles={len(req.closes)} "

@@ -37,6 +37,21 @@ export class TuningService {
         // Strip "PYTHON:" prefix if present
         const strategyKey = strategyRaw.replace(/^PYTHON:/i, '');
 
+        // Defensive check: Ensure all arrays have the same length
+        if (!Array.isArray(highs)) highs = [];
+        if (!Array.isArray(lows)) lows = [];
+        if (!Array.isArray(volumes)) volumes = [];
+
+        const cLen = closes.length;
+        if (highs.length !== cLen || lows.length !== cLen || volumes.length !== cLen) {
+            console.warn(`[TuningService] ⚠️ Array length mismatch for ${symbol}: C=${cLen}, H=${highs.length}, L=${lows.length}, V=${volumes.length}. Attempting to fix...`);
+            // If they are empty, fill them with 'closes' to prevent VBT mismatch 
+            // This allows strategies like RSI (which only need close) to still be optimized in VBT mode.
+            if (highs.length === 0) highs = [...closes];
+            if (lows.length === 0) lows = [...closes];
+            if (volumes.length === 0) volumes = closes.map(() => 0);
+        }
+
         console.log(`[TuningService] Optimizing parameters for ${symbol} (${strategyKey})...`);
 
         const search_space = getSearchSpace(bot);

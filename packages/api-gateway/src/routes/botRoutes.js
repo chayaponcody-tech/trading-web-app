@@ -108,6 +108,32 @@ export function createBotRoutes(botManager) {
 
   /**
    * @swagger
+   * /api/forward-test/adopt:
+   *   post:
+   *     summary: Manually adopt an external position into a Guardian bot
+   *     tags: [Bots]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             properties:
+   *               symbol: { type: string, example: "BNBUSDT" }
+   */
+  r.post('/adopt', async (req, res, next) => {
+    try {
+      const { symbol } = req.body;
+      if (!symbol) return res.status(400).json({ error: 'Symbol is required' });
+      await botManager.reattachOrphanPositions(symbol);
+      res.json({ success: true, message: `Adoption process started for ${symbol}` });
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  /**
+   * @swagger
    * /api/forward-test/clear-all:
    *   post:
    *     summary: Wipe ALL bots from memory and database
@@ -232,6 +258,7 @@ export function createBotRoutes(botManager) {
         oldParams: JSON.parse(r.oldParams || '{}'),
         newParams: JSON.parse(r.newParams || '{}'),
         engine: r.engine ?? 'optuna',
+        timestamp: r.timestamp && !r.timestamp.endsWith('Z') ? r.timestamp.replace(' ', 'T') + 'Z' : r.timestamp,
       }));
       res.json(parsed);
     } catch (e) {
@@ -239,6 +266,35 @@ export function createBotRoutes(botManager) {
     }
   });
 
+  /**
+   * @swagger
+   * /api/forward-test/tune-all:
+   *   post:
+   *     summary: Force AI parameter tuning for all running bots immediately
+   *     tags: [Bots]
+   */
+  r.post('/tune-all', async (req, res) => {
+    try {
+      const runningBots = Array.from(botManager.bots.values()).filter(b => b.isRunning);
+      console.log(`[Gateway] Manual Tuning triggered for ${runningBots.length} bots`);
+      
+      // Run tuning in background to not block response
+      for (const bot of runningBots) {
+        if (bot._lastKlines && bot._lastKlines.length > 50) {
+          const closed = bot._lastKlines.slice(0, -1);
+          const closes = closed.map(k => parseFloat(k[4]));
+          const highs = closed.map(k => parseFloat(k[2]));
+          const lows = closed.map(k => parseFloat(k[3]));
+          const volumes = closed.map(k => parseFloat(k[5]));
+          botManager.tuningService.tuneBot(bot, closes, highs, lows, volumes).catch(e => console.error(`[Manual Tune] Bot ${bot.id} error:`, e.message));
+        }
+      }
+      
+      res.json({ success: true, message: `Tuning started for ${runningBots.length} bots.` });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   return r;
 }
-

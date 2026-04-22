@@ -5,8 +5,8 @@ interface TuningLog {
   id: number;
   botId: string;
   symbol: string;
-  oldParams: string;
-  newParams: string;
+  oldParams: any;
+  newParams: any;
   reasoning: string;
   marketCondition: string;
   timestamp: string;
@@ -15,11 +15,12 @@ interface TuningLog {
 export default function TuningLogs() {
   const [logs, setLogs] = useState<TuningLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
 
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:3001/api/bots/tuning-history');
+      const res = await fetch('/api/bots/tuning-history');
       const data = await res.json();
       setLogs(data);
     } catch (err) {
@@ -52,9 +53,37 @@ export default function TuningLogs() {
           <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: '800', letterSpacing: '-0.5px', color: '#fff' }}>AI Intelligence 🧠</h2>
           <span style={{ fontSize: '0.7rem', color: '#722ed1', fontWeight: 'bold', padding: '0.2rem 0.6rem', border: '1px solid rgba(114,46,209,0.3)', borderRadius: '20px', background: 'rgba(114,46,209,0.05)' }}>Dynamic Tuning History</span>
         </div>
-        <button onClick={fetchLogs} disabled={loading} style={{ background: 'rgba(114,46,209,0.1)', border: '1px solid rgba(114,46,209,0.3)', color: '#b37feb', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}>
-          {loading ? 'Refreshing...' : '🔄 Refresh Data'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.8rem' }}>
+          <button 
+            onClick={fetchLogs} 
+            disabled={loading} 
+            style={{ background: 'rgba(114,46,209,0.1)', border: '1px solid rgba(114,46,209,0.3)', color: '#b37feb', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}>
+            {loading ? 'Refreshing...' : '🔄 Refresh Data'}
+          </button>
+
+          <button 
+            onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
+            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#eee', padding: '0.5rem 1rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem' }}>
+            {sortOrder === 'desc' ? '🕒 Newest First' : '🕒 Oldest First'}
+          </button>
+          <button 
+            onClick={async () => {
+              if (!window.confirm('คุณต้องการสั่งให้ AI ปรับจูนบอททุกตัวที่รันอยู่ตอนนี้ทันทีหรือไม่? (อาจใช้เวลาสักครู่)')) return;
+              setLoading(true);
+              try {
+                const res = await fetch('/api/bots/tune-all', { method: 'POST' });
+                if (res.ok) {
+                   alert('AI Tuning Triggered! โปรดรอครู่หนึ่งแล้วกด Refresh ครับ');
+                   setTimeout(fetchLogs, 5000);
+                }
+              } catch (e) { alert('Tuning Error'); }
+              finally { setLoading(false); }
+            }}
+            disabled={loading}
+            style={{ background: '#722ed1', border: 'none', color: '#fff', padding: '0.5rem 1.25rem', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 'bold' }}>
+            ✨ Run AI Optimizer Now
+          </button>
+        </div>
       </div>
 
       {/* Stats Summary */}
@@ -74,9 +103,15 @@ export default function TuningLogs() {
             <div style={{ fontSize: '0.8rem', color: '#555', marginTop: '0.5rem' }}>AI Tuner triggers every 50 bot checks.</div>
           </div>
         ) : (
-          logs.map((log) => {
-            const oldP = JSON.parse(log.oldParams || '{}');
-            const newP = JSON.parse(log.newParams || '{}');
+          [...logs]
+            .sort((a, b) => {
+              const dateA = new Date(a.timestamp).getTime();
+              const dateB = new Date(b.timestamp).getTime();
+              return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+            })
+            .map((log) => {
+            const oldP = log.oldParams || {};
+            const newP = log.newParams || {};
             return (
               <div key={log.id} className="glass-panel" style={{ padding: '1.5rem', background: 'rgba(255,255,255,0.02)', position: 'relative', overflow: 'hidden' }}>
                  <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: '4px', background: getConditionColor(log.marketCondition) }}></div>
@@ -87,7 +122,7 @@ export default function TuningLogs() {
                         <span style={{ background: 'rgba(114,46,209,0.1)', color: '#b37feb', fontSize: '0.7rem', padding: '2px 8px', borderRadius: '4px', border: '1px solid rgba(114,46,209,0.2)' }}>RAG LOG #{log.id}</span>
                         <span style={{ fontSize: '0.7rem', color: getConditionColor(log.marketCondition), fontWeight: 'bold', textTransform: 'uppercase' }}>● {log.marketCondition?.replace('_', ' ')}</span>
                     </div>
-                    <span style={{ color: '#666', fontSize: '0.8rem' }}>{new Date(log.timestamp).toLocaleString('th-TH')}</span>
+                    <span style={{ color: '#666', fontSize: '0.8rem' }}>{new Date(log.timestamp).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}</span>
                  </div>
 
                  <div style={{ background: 'rgba(0,0,0,0.15)', padding: '1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid rgba(255,255,255,0.03)' }}>

@@ -9,7 +9,7 @@ import { PriceChart } from './components/PriceChart';
 import { RsiChart } from './components/RsiChart';
 
 export default function PositionChartModal({ 
-  symbol, interval, entryPrice, entryTime, type, reason, strategy, gridUpper, gridLower, onClose 
+  symbol, interval, entryPrice, entryTime, type, reason, strategy, gridUpper, gridLower, tp, sl, onClose 
 }: ChartProps) {
   const [showRSI, setShowRSI] = useState(false);
   const [mainChart, setMainChart] = useState<IChartApi | null>(null);
@@ -53,6 +53,7 @@ export default function PositionChartModal({
                 hasPosition={hasPosition}
                 type={type} strategy={strategy} 
                 gridUpper={gridUpper} gridLower={gridLower}
+                tp={tp} sl={sl}
                 onChartCreated={setMainChart}
               />
            </div>

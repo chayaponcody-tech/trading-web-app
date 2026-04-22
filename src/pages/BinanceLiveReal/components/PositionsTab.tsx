@@ -155,9 +155,30 @@ export default function PositionsTab({ activePositions, bots, fleets, onManualCl
                         </span>
                       </td>
                       <td style={{ padding: '1rem' }}>
-                        {tpPrice > 0 && <div style={{ fontSize: '0.75rem', color: '#0ecb81', fontWeight: 'bold' }}>TP: {formatPrice(tpPrice)}</div>}
-                        {slPrice > 0 && <div style={{ fontSize: '0.75rem', color: '#f6465d', fontWeight: 'bold' }}>SL: {formatPrice(slPrice)}</div>}
-                        {!tpPrice && !slPrice && <span style={{ opacity: 0.3 }}>-</span>}
+                        {(() => {
+                           const finalTp = botPos?.dynamicTp || tpPrice;
+                           const finalSl = botPos?.dynamicSl || slPrice;
+                           const isAiAdjusted = !!(botPos?.dynamicTp || botPos?.dynamicSl);
+                           
+                           if (!finalTp && !finalSl) return <span style={{ opacity: 0.3 }}>-</span>;
+
+                           return (
+                             <>
+                               <div style={{ fontSize: '0.8rem', color: isAiAdjusted ? '#faad14' : '#0ecb81', fontWeight: 'bold' }}>
+                                 {isAiAdjusted ? '✨ AI TP: ' : 'TP: '}{formatPrice(finalTp)}
+                               </div>
+                               <div style={{ fontSize: '0.8rem', color: isAiAdjusted ? '#faad14' : '#f6465d', fontWeight: 'bold' }}>
+                                 {isAiAdjusted ? '✨ AI SL: ' : 'SL: '}{formatPrice(finalSl)}
+                               </div>
+
+                               {linkedBot?.lastAiCheck && (
+                                 <div style={{ fontSize: '0.6rem', color: '#666', marginTop: '4px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '2px' }}>
+                                   ⏱️ AI Update: {new Date(linkedBot.lastAiCheck).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' })}
+                                 </div>
+                               )}
+                             </>
+                           );
+                        })()}
                       </td>
                       <td style={{ padding: '1rem' }}>
                         <div style={{ fontSize: '0.65rem', color: '#faad14', fontStyle: 'italic', maxWidth: '180px', lineHeight: '1.4' }}>

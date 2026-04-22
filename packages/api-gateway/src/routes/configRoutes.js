@@ -21,13 +21,14 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
       // Live keys status
       liveApiKey: cfg.liveApiKey ? '****' + cfg.liveApiKey.slice(-4) : '',
       hasLiveKeys: !!(cfg.liveApiKey && cfg.liveApiSecret),
+      virtualTestBalance: cfg.virtualTestBalance || 1000,
     });
   });
 
   r.post('/', async (req, res, next) => {
     try {
-      const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, liveApiKey, liveApiSecret } = req.body;
-      patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, liveApiKey, liveApiSecret });
+      const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, liveApiKey, liveApiSecret, virtualTestBalance } = req.body;
+      patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, liveApiKey, liveApiSecret, virtualTestBalance });
 
       const updated = loadBinanceConfig();
 

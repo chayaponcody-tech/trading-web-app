@@ -12,13 +12,15 @@ interface Props {
 export default function HistoryTab({ tradeHistory, fetchingHistory, fetchHistory }: Props) {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [filterType, setFilterType] = useState<'all' | 'bot' | 'manual'>('all');
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
   const filtered = tradeHistory.filter((t: any) => {
     // 1. Date Filter
     let dateMatch = true;
     if (selectedDate !== 'all') {
-      if (!t.exitTime) return false;
-      const d = new Date(t.exitTime);
+      const ts = t.timestamp || t.exitTime;
+      if (!ts) return false;
+      const d = new Date(ts);
       if (isNaN(d.getTime())) return false;
       dateMatch = d.toISOString().split('T')[0] === selectedDate;
     }
@@ -32,12 +34,12 @@ export default function HistoryTab({ tradeHistory, fetchingHistory, fetchHistory
   });
 
   const totalPnL = filtered.reduce((sum: number, t: any) => {
-    const v = t.pnl !== undefined ? parseFloat(t.pnl) : 0;
+    const v = t.realizedPnl !== undefined ? parseFloat(t.realizedPnl) : (t.pnl !== undefined ? parseFloat(t.pnl) : 0);
     return sum + (isNaN(v) ? 0 : v);
   }, 0);
   
-  const wins = filtered.filter((t: any) => parseFloat(t.pnl || 0) > 0).length;
-  const losses = filtered.filter((t: any) => parseFloat(t.pnl || 0) < 0).length;
+  const wins = filtered.filter((t: any) => parseFloat(t.realizedPnl || t.pnl || 0) > 0).length;
+  const losses = filtered.filter((t: any) => parseFloat(t.realizedPnl || t.pnl || 0) < 0).length;
   const winRate = filtered.length > 0 ? (wins / (wins+losses) * 100).toFixed(1) : '0';
 
   return (
@@ -92,16 +94,31 @@ export default function HistoryTab({ tradeHistory, fetchingHistory, fetchHistory
           <div style={{ textAlign: 'center', padding: '4rem', color: '#888' }}>No trades recorded.</div>
         ) : (
           filtered.map((t: any, i: number) => {
-            const pnlVal = t.pnl !== undefined ? parseFloat(t.pnl) : 0;
+            const pnlVal = t.realizedPnl !== undefined ? parseFloat(t.realizedPnl) : (parseFloat(t.pnl || 0));
             return (
               <div key={i} className="glass-panel" style={{ padding: '1rem', background: 'rgba(255,255,255,0.02)', borderLeft: `5px solid ${pnlVal >= 0 ? '#0ecb81' : '#f6465d'}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{t.symbol} <b>{t.type}</b></span>
+                  <span>{t.symbol} <b>{t.side || t.type}</b></span>
                   <span style={{ color: pnlVal >= 0 ? '#0ecb81' : '#f6465d' }}>{pnlVal >= 0 ? '+' : ''}{pnlVal.toFixed(2)} USDT</span>
                 </div>
-                <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.4rem' }}>
-                  Reason: {t.reason || 'Closed'} | Time: {new Date(t.exitTime).toLocaleString('th-TH')}
+                <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.4rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span>Reason: {t.reason || 'Closed'} | Time: {new Date(t.timestamp || t.exitTime).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}</span>
+                  
+                  {t.aiLesson && (
+                    <button 
+                      onClick={() => setExpandedIndex(expandedIndex === i ? null : i)}
+                      style={{ background: 'rgba(250,173,20,0.1)', border: '1px solid #faad14', color: '#faad14', padding: '2px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '0.7rem' }}>
+                      {expandedIndex === i ? 'ปิด Review' : '🧠 View AI Review'}
+                    </button>
+                  )}
                 </div>
+
+                {expandedIndex === i && t.aiLesson && (
+                  <div style={{ marginTop: '1rem', padding: '0.8rem', background: 'rgba(250,173,20,0.05)', borderRadius: '6px', borderLeft: '3px solid #faad14' }}>
+                    <div style={{ color: '#faad14', fontWeight: 'bold', fontSize: '0.65rem', marginBottom: '0.3rem', textTransform: 'uppercase' }}>AI LESSON LEARNED:</div>
+                    <p style={{ margin: 0, color: '#eee', fontStyle: 'italic', fontSize: '0.85rem', lineHeight: '1.4' }}>"{t.aiLesson}"</p>
+                  </div>
+                )}
               </div>
             );
           })

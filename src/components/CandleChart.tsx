@@ -45,6 +45,8 @@ export interface CandleChartHandle {
   /** Expose chart instance for external sync */
   getChart(): IChartApi | null;
   getCandleSeries(): ISeriesApi<'Candlestick'> | null;
+  /** Toggle visibility of specific overlay layers */
+  toggleOverlay(key: keyof OverlayToggleState): void;
 }
 
 export interface CandleChartProps {
@@ -63,6 +65,10 @@ export interface CandleChartProps {
   autoRangeFromTrades?: boolean;
   onTradeSelect?: (trade: Trade | null) => void;
   onDataLoaded?: (data: any[]) => void;
+  /** Manually provided trade setup to draw levels on chart (useful for live analysis) */
+  manualTrade?: Trade | null;
+  strategyId?: string;
+  initialToggles?: Partial<OverlayToggleState>;
 }
 
 function toChartTime(iso: string): Time {
@@ -110,10 +116,13 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
     overlayData = {},
     equityCurve,
     showMarkers = true,
-    height = 'calc(100vh - 340px)',
+    height = '100%',
     autoRangeFromTrades = false,
     onTradeSelect,
     onDataLoaded,
+    manualTrade,
+    strategyId,
+    initialToggles,
   },
   ref,
 ) {
@@ -127,6 +136,8 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const lastParamsRef = useRef({ symbol: '', interval: '' });
 
   const [allCandles, setAllCandles] = useState<{ time: Time; open: number; high: number; low: number; close: number; volume?: number }[]>([]);
   const [selectedTrade, setSelectedTrade] = useState<Trade | null>(null);
@@ -137,7 +148,11 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
     if (trades.length > 0) setSelectedTrade(trades[trades.length - 1]);
     else setSelectedTrade(null);
   }, [trades]);
-  const [toggleStates, setToggleStates] = useState<OverlayToggleState>({ ema20: true, ema50: true, bb: true, rsi: true, levels: true, zones: true });
+
+  const [toggleStates, setToggleStates] = useState<OverlayToggleState>({ 
+    ema20: true, ema50: true, bb: true, rsi: true, levels: true, zones: false,
+    ...initialToggles
+  });
   const [showMarkersState, setShowMarkersState] = useState(showMarkers);
   const [storedMarkers, setStoredMarkers] = useState<SeriesMarker<Time>[]>([]);
   const [loading, setLoading] = useState(false);
@@ -198,6 +213,21 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
     };
   }, []);
 
+  // ── INIT RESIZE OBSERVER ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!candleContainerRef.current || !candleChartRef.current) return;
+    const container = candleContainerRef.current;
+    
+    const observer = new ResizeObserver(entries => {
+      if (!entries || entries.length === 0 || !candleChartRef.current) return;
+      const { width, height } = entries[0].contentRect;
+      candleChartRef.current.applyOptions({ width, height });
+    });
+    
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   // ── Markers ─────────────────────────────────────────────────────────────────
   const applyMarkers = useCallback((markers: SeriesMarker<Time>[], visible: boolean) => {
     if (!candleSeriesRef.current) return;
@@ -212,11 +242,6 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
     applyMarkers(storedMarkers, showMarkersState);
   }, [showMarkersState, storedMarkers, applyMarkers]);
 
-  // ── Equity curve from prop ───────────────────────────────────────────────────
-  // Handled by EquityMiniChart component (mounts fresh when showEquity=true)
-
-  const [showTradeInfo, setShowTradeInfo] = useState(true);
-
   // ── Crosshair hover → show nearest trade info ────────────────────────────────
   useEffect(() => {
     const chart = candleChartRef.current;
@@ -229,7 +254,6 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
       for (const t of trades) {
         const entryTs = Math.floor(new Date(t.entryTime).getTime() / 1000) + TZ_OFFSET;
         const exitTs  = Math.floor(new Date(t.exitTime).getTime() / 1000) + TZ_OFFSET;
-        // Match if hover is within the trade's entry→exit range (+ 5 bar pad)
         const pad = intervalSec * 5;
         if (hoverTime >= entryTs - pad && hoverTime <= exitTs + pad) {
           const diff = Math.abs(entryTs - hoverTime);
@@ -261,23 +285,9 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
     };
   }, [trades, interval, onTradeSelect, allCandles]);
 
-  // ── Scroll to selected trade ─────────────────────────────────────────────────
-  useEffect(() => {
-    if (!selectedTrade || !candleChartRef.current) return;
-    const entryTs = Math.floor(new Date(selectedTrade.entryTime).getTime() / 1000) + TZ_OFFSET;
-    const exitTs  = Math.floor(new Date(selectedTrade.exitTime).getTime() / 1000) + TZ_OFFSET;
-    const pad = ((INTERVAL_MS[interval] ?? 3600000) / 1000) * 20;
-    try {
-      candleChartRef.current.timeScale().setVisibleRange({
-        from: (entryTs - pad) as Time,
-        to: (exitTs + pad) as Time,
-      });
-    } catch { /* ignore */ }
-  }, [selectedTrade, interval]);
-
   // ── Auto-fetch klines ────────────────────────────────────────────────────────
   const loadKlines = useCallback(async (params: {
-    symbol: string; interval: string; startDate?: string; endDate?: string;
+    symbol: string; interval: string; startDate?: string; endDate?: string; strategyId?: string;
   }) => {
     if (!candleSeriesRef.current || !candleChartRef.current) return;
     setLoading(true);
@@ -293,9 +303,13 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
       resolvedEnd   = new Date().toISOString();
     }
 
-    const urlParams = new URLSearchParams({ symbol: params.symbol, interval: params.interval, limit: '1500' });
+    const urlParams = new URLSearchParams({ 
+      symbol: params.symbol, 
+      interval: params.interval, 
+      limit: '1500',
+      strategyId: params.strategyId || strategyId || 'default-smc'
+    });
     if (resolvedStart) urlParams.set('startTime', String(new Date(resolvedStart).getTime()));
-    // Only set endTime if it's meaningfully in the past (> 1 bar ago), otherwise omit to get latest bars
     if (resolvedEnd) {
       const intervalMs2 = INTERVAL_MS[params.interval] ?? 3600000;
       const endMs = new Date(resolvedEnd).getTime();
@@ -305,8 +319,15 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
       }
     }
 
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     try {
-      const res  = await fetch(`/api/backtest?${urlParams}`);
+      const res  = await fetch(`/api/backtest?${urlParams}`, {
+        signal: abortControllerRef.current.signal
+      });
       const data = await res.json() as unknown[];
       if (!Array.isArray(data) || data.length === 0) { setFetchError('ไม่มีข้อมูล kline'); setLoading(false); return; }
 
@@ -320,9 +341,16 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
         };
       }).sort((a, b) => (a.time as number) - (b.time as number));
 
+      const isRefresh = allCandles.length > 0 && 
+                        lastParamsRef.current.symbol === params.symbol && 
+                        lastParamsRef.current.interval === params.interval;
+
+      // ── VIEWPORT SNAPSHOT ──
+      const timeScale = candleChartRef.current?.timeScale();
+      const previousLogicalRange = isRefresh ? timeScale?.getVisibleLogicalRange() : null;
+
       candleSeriesRef.current?.setData(cdata);
 
-      // Volume overlay
       if (volumeSeriesRef.current) {
         volumeSeriesRef.current.setData(cdata.map(c => ({
           time: c.time,
@@ -330,14 +358,35 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
           color: c.close >= c.open ? 'rgba(14,203,129,0.4)' : 'rgba(246,70,93,0.4)',
         })));
       }
-      candleChartRef.current?.timeScale().fitContent();
-      candleChartRef.current?.timeScale().applyOptions({ rightOffset: 12 });
-      setAllCandles(cdata);
-      if (onDataLoaded) {
-        onDataLoaded(cdata);
+
+      // ── VIEW RESTORE LOGIC ──
+      if (isRefresh && previousLogicalRange) {
+        try {
+          // Wait a frame for the chart to index new data
+          setTimeout(() => {
+            timeScale?.setVisibleLogicalRange(previousLogicalRange);
+          }, 10);
+        } catch (e) { /* fallback */ }
+      } else {
+        // 🎯 AUTO-FOCUS (ONLY ON NEW LOAD): Show last ~100 candles for better clarity
+        try {
+          setTimeout(() => {
+            const lastIndex = cdata.length - 1;
+            timeScale?.setVisibleLogicalRange({
+              from: (lastIndex - 100) as any,
+              to: (lastIndex + 10) as any, 
+            });
+            timeScale?.applyOptions({ rightOffset: 12 });
+          }, 50);
+        } catch (e) {
+          timeScale?.fitContent(); // Fallback
+        }
       }
 
-      // Build markers from trades
+      lastParamsRef.current = { symbol: params.symbol, interval: params.interval };
+      setAllCandles(cdata);
+      if (onDataLoaded) onDataLoaded(cdata);
+
       if (trades.length > 0 && candleSeriesRef.current) {
         const barTimesArr = cdata.map(c => c.time as number).sort((a, b) => a - b);
         const minT = barTimesArr[0], maxT = barTimesArr[barTimesArr.length - 1];
@@ -362,17 +411,18 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
           .filter(m => (m.time as number) >= minT && (m.time as number) <= maxT);
         setStoredMarkers(inRange);
       }
-    } catch { setFetchError('โหลด kline ไม่สำเร็จ'); }
+    } catch (err: any) { 
+      if (err.name === 'AbortError') return;
+      setFetchError('โหลด kline ไม่สำเร็จ'); 
+    }
     setLoading(false);
   }, [trades, autoRangeFromTrades]);
 
   useEffect(() => {
     if (!autoFetch) return;
-    // If autoRangeFromTrades, wait until trades are available before fetching
     if (autoRangeFromTrades && trades.length === 0) return;
-    loadKlines({ symbol, interval, startDate, endDate });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoFetch, symbol, interval, startDate, endDate, trades.length, autoRangeFromTrades]);
+    loadKlines({ symbol, interval, startDate, endDate, strategyId });
+  }, [autoFetch, symbol, interval, startDate, endDate, trades.length, autoRangeFromTrades, strategyId]);
 
   // ── Imperative handle ────────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
@@ -391,135 +441,105 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
       markersPluginRef.current?.setMarkers([]);
       setStoredMarkers([]);
     },
-    setEquityCurve(_curve) { /* handled by EquityMiniChart */ },
-    clearEquityCurve() { /* handled by EquityMiniChart */ },
+    setEquityCurve(_curve) { },
+    clearEquityCurve() { },
     getChart() { return candleChartRef.current; },
     getCandleSeries() { return candleSeriesRef.current; },
+    toggleOverlay(key: keyof OverlayToggleState) {
+      setToggleStates(prev => ({ ...prev, [key]: !prev[key] }));
+    }
   }), [loadKlines, applyMarkers]);
 
-  // ── Trade info panel ─────────────────────────────────────────────────────────
   const tradeIdx = selectedTrade ? trades.indexOf(selectedTrade) + 1 : 0;
-  const infoPanel = showTradeInfo && selectedTrade ? (() => {
+  const infoPanel = selectedTrade ? (() => {
     const t = selectedTrade;
     const isLong = t.type === 'LONG';
-    const tp2 = t.tp2Price ?? (t.tpPrice > 0 ? t.entryPrice + (t.tpPrice - t.entryPrice) * 2 : 0);
-    const tp3 = t.tp3Price ?? (t.tpPrice > 0 ? t.entryPrice + (t.tpPrice - t.entryPrice) * 3 : 0);
     const rows: [string, string, string?][] = [
       ['Trade', `#${tradeIdx} ${t.type}`, isLong ? '#0ecb81' : '#f6465d'],
       ['Entry', `$${t.entryPrice.toFixed(2)}`],
       ['Exit', `$${t.exitPrice.toFixed(2)}`],
-      ['PnL', `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)} (${t.pnlPct >= 0 ? '+' : ''}${t.pnlPct.toFixed(2)}%)`, t.pnl >= 0 ? '#0ecb81' : '#f6465d'],
+      ['PnL', `${t.pnl >= 0 ? '+' : ''}$${t.pnl.toFixed(2)} (${t.pnlPct.toFixed(2)}%)`, t.pnl >= 0 ? '#0ecb81' : '#f6465d'],
       ['Reason', t.exitReason],
-      ['─', ''],
-      ['TP1', t.tpPrice > 0 ? `$${t.tpPrice.toFixed(2)}` : '—', '#0ecb81'],
-      ['TP2', tp2 > 0 ? `$${tp2.toFixed(2)}` : '—', '#00e5a0'],
-      ['TP3', tp3 > 0 ? `$${tp3.toFixed(2)}` : '—', '#00ffc8'],
-      ['SL', t.slPrice > 0 ? `$${t.slPrice.toFixed(2)}` : '—', '#f6465d'],
-      ['─', ''],
-      ['Conf.', t.entryConfidence != null ? `${((t.entryConfidence as number) * 100).toFixed(0)}%` : '—'],
-      ['ATR', t.atr != null ? `$${(t.atr as number).toFixed(2)}` : '—'],
-      ['Regime', t.regime ?? '—'],
     ];
     return (
       <div style={{
-        width: '180px', flexShrink: 0,
-        background: 'rgba(10,14,23,0.95)',
+        position: 'absolute',
+        top: '1rem',
+        right: '1rem',
+        width: '180px',
+        zIndex: 100,
+        background: 'rgba(10,14,23,0.92)',
+        backdropFilter: 'blur(8px)',
         border: '1px solid rgba(255,255,255,0.1)',
-        borderRadius: '8px', padding: '0.75rem',
-        fontSize: '0.72rem', fontFamily: 'monospace',
-        alignSelf: 'flex-start',
+        borderRadius: '8px', 
+        padding: '0.75rem',
+        fontSize: '0.72rem', 
+        fontFamily: 'monospace',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
       }}>
         <div style={{ fontWeight: 700, fontSize: '0.78rem', marginBottom: '0.5rem', color: '#fff', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.35rem' }}>
           Trade Info
         </div>
-        {rows.map(([label, value, color], i) =>
-          label === '─' ? (
-            <div key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.07)', margin: '0.3rem 0' }} />
-          ) : (
+        {rows.map(([label, value, color], i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.4rem', marginBottom: '0.2rem' }}>
-              <span style={{ color: '#555' }}>{label}</span>
-              <span style={{ color: color ?? '#ccc', textAlign: 'right', maxWidth: '110px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+              <span style={{ color: '#888' }}>{label}</span>
+              <span style={{ color: color ?? '#ccc', textAlign: 'right' }}>{value}</span>
             </div>
-          )
-        )}
-        <button onClick={() => { setSelectedTrade(null); onTradeSelect?.(null); }} style={{ marginTop: '0.5rem', width: '100%', background: 'transparent', border: '1px solid #333', color: '#666', borderRadius: '4px', padding: '0.2rem', cursor: 'pointer', fontSize: '0.7rem' }}>
+        ))}
+        <button onClick={() => { setSelectedTrade(null); onTradeSelect?.(null); }} style={{ marginTop: '0.5rem', width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#aaa', borderRadius: '4px', padding: '0.2rem', cursor: 'pointer', fontSize: '0.7rem', transition: 'all 0.2s' }}>
           ✕ Clear
         </button>
       </div>
     );
   })() : null;
 
-  const chartHeight = typeof height === 'number' ? `${height}px` : height;
   const hasEquity = !!(equityCurve && equityCurve.length > 0);
   const hasRsi    = !!(overlayData.rsi && overlayData.rsi.length > 0);
   const [showEquity, setShowEquity] = useState(false);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height: chartHeight }}>
-      {/* Toolbar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.4rem' }}>
-        <span style={{ fontSize: '0.8rem', fontWeight: 600 }}>
-          {symbol}
-          {selectedTrade && <span style={{ fontSize: '0.7rem', color: selectedTrade.type === 'LONG' ? '#0ecb81' : '#f6465d', marginLeft: '0.5rem' }}>▶ Trade #{tradeIdx} — click to deselect</span>}
-        </span>
-        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <ReplayControls allCandles={allCandles} candleSeries={candleSeriesRef.current} />
-          <DrawingTools chart={candleChartRef.current} candleSeries={candleSeriesRef.current} />
-          <OverlayToggleControls overlayData={overlayData} toggleStates={toggleStates} onToggleChange={(k, v) => setToggleStates(p => ({ ...p, [k]: v }))} />
-          <button
-            onClick={() => setShowMarkersState(v => !v)}
-            style={{ background: showMarkersState ? 'var(--accent-primary)' : 'transparent', color: showMarkersState ? '#fff' : 'var(--text-main)', border: '1px solid #444', padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer' }}
-          >
-            {showMarkersState ? 'Hide Markers' : 'Show Markers'}
-          </button>
-          {hasEquity && (
-            <button
-              onClick={() => setShowEquity(v => !v)}
-              style={{ background: showEquity ? 'rgba(14,203,129,0.2)' : 'transparent', color: showEquity ? '#0ecb81' : 'var(--text-muted)', border: `1px solid ${showEquity ? '#0ecb81' : '#444'}`, padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer' }}
-            >
-              Equity Curve
-            </button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', height, width: '100%' }}>
+      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', flex: 1, minHeight: 0, position: 'relative' }}>
+        <div style={{ flex: 1, minWidth: 0, height: '100%', position: 'relative' }}>
+          {loading && (
+            <div style={{
+              position: 'absolute', inset: 0, background: 'rgba(19, 23, 34, 0.7)', backdropFilter: 'blur(2px)',
+              zIndex: 9999, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem'
+            }}>
+               <div className="animate-spin" style={{ width: '40px', height: '40px', border: '3px solid rgba(255,255,255,0.1)', borderTop: '3px solid #00d1ff', borderRadius: '50%' }} />
+               <span style={{ fontSize: '0.8rem', color: '#fff', fontWeight: 600 }}>SYNCING {symbol}...</span>
+            </div>
           )}
-          {trades.length > 0 && (
-            <button
-              onClick={() => setShowTradeInfo(v => !v)}
-              style={{ background: showTradeInfo ? 'rgba(0,209,255,0.15)' : 'transparent', color: showTradeInfo ? 'var(--accent-primary, #00d1ff)' : 'var(--text-muted)', border: `1px solid ${showTradeInfo ? 'var(--accent-primary, #00d1ff)' : '#444'}`, padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.7rem', cursor: 'pointer' }}
-            >
-              Trade Info
-            </button>
+          {fetchError && !loading && (
+            <div style={{
+              position: 'absolute', inset: 0, background: 'rgba(19, 23, 34, 0.9)', zIndex: 9998,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f6465d', fontWeight: 'bold'
+            }}>
+               ⚠️ {fetchError}
+            </div>
           )}
-        </div>
-      </div>
-
-      {/* Candle chart + info panel */}
-      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', flex: 1, minHeight: 0 }}>
-        <div style={{ flex: 1, minWidth: 0, height: '100%' }}>
-          {loading && allCandles.length === 0 && <div style={{ height: chartHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>กำลังโหลด...</div>}
-          {fetchError && <div style={{ height: chartHeight, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f6465d' }}>{fetchError}</div>}
-          <div ref={candleContainerRef} style={{ height: chartHeight, width: '100%', display: (loading && allCandles.length === 0) || fetchError ? 'none' : 'block' }} />
+          <div ref={candleContainerRef} style={{ height: '100%', width: '100%' }} />
         </div>
         {infoPanel}
       </div>
 
-      {/* OverlayRenderer — indicators + TP/SL/Entry lines */}
       <OverlayRenderer
         chart={candleChartRef.current}
         candleSeries={candleSeriesRef.current}
         rsiChartRef={rsiChartRef}
         overlayData={overlayData}
         trades={trades}
-        selectedTrade={selectedTrade}
+        selectedTrade={manualTrade || selectedTrade}
         strategy=""
         showMarkers={showMarkersState}
         toggleStates={toggleStates}
         onToggleChange={(k, v) => setToggleStates(p => ({ ...p, [k]: v }))}
       />
 
-      {/* RSI sub-panel */}
       {hasRsi && (
         <div className="glass-panel" style={{ padding: '1rem' }}>
           <h5 className="m-0" style={{ marginBottom: '0.5rem' }}>RSI</h5>
-          <div style={{ height: '120px', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
+          <div style={{ height: '120px', border: '1px solid #333', borderRadius: '4px', overflow: 'hidden' }}>
             <div ref={rsiContainerRef} style={{ width: '100%', height: '100%' }} />
           </div>
         </div>
@@ -528,13 +548,12 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
       {hasEquity && showEquity && (
         <div className="glass-panel" style={{ padding: '1rem' }}>
           <h5 className="m-0" style={{ marginBottom: '0.5rem' }}>Portfolio Equity Curve</h5>
-          <div style={{ height: '180px', border: '1px solid var(--border-color)', borderRadius: '4px', overflow: 'hidden' }}>
+          <div style={{ height: '180px', border: '1px solid #333', borderRadius: '4px', overflow: 'hidden' }}>
             <EquityMiniChart data={equityCurve ?? []} />
           </div>
         </div>
       )}
 
-      {/* Indicator sub-panels */}
       <IndicatorPanel candles={allCandles} syncChart={candleChartRef.current} />
     </div>
   );

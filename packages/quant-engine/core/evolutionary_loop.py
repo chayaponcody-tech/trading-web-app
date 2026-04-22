@@ -32,6 +32,7 @@ class AgentRegistry:
     strategy_manager: Any
     sentiment_agent: Any
     data_agent: Any
+    scout_agent: Any
 
 
 class EvolutionaryLoop:
@@ -53,7 +54,11 @@ class EvolutionaryLoop:
         self.strategy_manager = agents.strategy_manager
         self.sentiment_agent = agents.sentiment_agent
         self.data_agent = agents.data_agent
+        self.scout_agent = agents.scout_agent
         self.db = db
+        
+        # New: Real-time event log buffer (last 50 events)
+        self._logs: list[dict] = []
 
         # Initialise status for every agent
         self._agent_status: dict[str, AgentStatus] = {
@@ -62,7 +67,20 @@ class EvolutionaryLoop:
             "strategy_manager": AgentStatus(name="strategy_manager", state="idle"),
             "sentiment_agent": AgentStatus(name="sentiment_agent", state="idle"),
             "data_agent": AgentStatus(name="data_agent", state="idle"),
+            "scout_agent": AgentStatus(name="scout_agent", state="idle"),
         }
+        
+    def _add_log(self, message: str, level: str = "INFO"):
+        """Add a timestamped log entry to the circular buffer."""
+        log_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "message": message,
+            "level": level
+        }
+        self._logs.insert(0, log_entry) # Most recent first
+        if len(self._logs) > 50:
+            self._logs.pop()
+        logger.info(f"QuantLoop: {message}")
 
     # ------------------------------------------------------------------ #
     # Timeout wrapper                                                      #
@@ -136,24 +154,42 @@ class EvolutionaryLoop:
         """
         cycle_id = str(uuid.uuid4())
         started_at = datetime.now(timezone.utc).isoformat()
+        self._add_log(f"--- Starting Generation Cycle {cycle_id[:8]} ---")
 
         strategies_generated = 0
         strategies_approved = 0
         strategies_rejected = 0
         errors: list[dict] = []
 
+        # ── Step 0: Scout for Alpha (Topic Discovery) ─────────────────────
+        current_topic = topic
+        if not current_topic or current_topic == "auto":
+            try:
+                self._add_log("ScoutAgent: Searching for new alpha ideas...")
+                current_topic = await self._call_with_timeout(
+                    "scout_agent",
+                    self.scout_agent.scout_for_alpha(),
+                    timeout=30,
+                )
+                self._add_log(f"ScoutAgent: Research topic found: '{current_topic}'")
+            except Exception as exc:
+                self._add_log(f"ScoutAgent failed, falling back to default topic.", "WARNING")
+                current_topic = "trend following with volatility filter"
+
         # ── Step 1: Alpha generation ──────────────────────────────────────
         try:
+            self._add_log(f"AlphaAgent: Generating Python code for topic '{current_topic[:30]}...'")
             generation_result = await self._call_with_timeout(
                 "alpha_agent",
-                self.alpha_agent.generate_strategy(topic),
+                self.alpha_agent.generate_strategy(current_topic),
                 timeout=60,
             )
         except Exception as exc:
+            self._add_log(f"AlphaAgent critical error: {exc}", "ERROR")
             errors.append(
                 self._build_error_log(
                     agent_name="alpha_agent",
-                    input_payload={"topic": topic},
+                    input_payload={"topic": current_topic},
                     error_type=type(exc).__name__,
                     cycle_id=cycle_id,
                 )
@@ -165,13 +201,14 @@ class EvolutionaryLoop:
             )
 
         if generation_result.status != "success":
-            # Generation failed after all retries — nothing to backtest
+            self._add_log(f"AlphaAgent failed to generate code. Status: {generation_result.status}", "WARNING")
             return self._build_cycle_result(
                 cycle_id, started_at,
                 strategies_generated, strategies_approved,
                 strategies_rejected, errors,
             )
 
+        self._add_log(f"AlphaAgent: Successfully generated strategy '{generation_result.strategy_key[:8]}'")
         strategies_generated += 1
         strategy_key = generation_result.strategy_key
         python_code = generation_result.python_code
@@ -179,12 +216,15 @@ class EvolutionaryLoop:
 
         # ── Step 2: Backtest evaluation ───────────────────────────────────
         try:
+            self._add_log(f"BacktestAgent: Evaluating strategy performance on historical data...")
             backtest_result = await self._call_with_timeout(
                 "backtest_agent",
                 self.backtest_agent.evaluate(strategy_key, python_code),
                 timeout=60,
             )
+            self._add_log(f"BacktestAgent: Result {'APPROVED' if backtest_result.approved else 'REJECTED'}")
         except Exception as exc:
+            self._add_log(f"BacktestAgent error: {exc}", "ERROR")
             errors.append(
                 self._build_error_log(
                     agent_name="backtest_agent",
@@ -205,6 +245,7 @@ class EvolutionaryLoop:
         # ── Step 3a: Approved → register ─────────────────────────────────
         if backtest_result.approved:
             try:
+                self._add_log(f"StrategyManager: Registering approved strategy '{strategy_key}'")
                 await self._call_with_timeout(
                     "strategy_manager",
                     self.strategy_manager.register_approved(
@@ -215,7 +256,9 @@ class EvolutionaryLoop:
                     timeout=60,
                 )
                 strategies_approved += 1
+                self._add_log(f"StrategyManager: Registration complete.")
             except Exception as exc:
+                self._add_log(f"StrategyManager registration failed: {exc}", "ERROR")
                 errors.append(
                     self._build_error_log(
                         agent_name="strategy_manager",
@@ -233,6 +276,7 @@ class EvolutionaryLoop:
             strategies_rejected += 1
             rejection_reason = backtest_result.rejection_reason or "Backtest rejected"
             try:
+                self._add_log(f"AlphaAgent: Attempting mutation due to: {rejection_reason[:50]}...")
                 await self._call_with_timeout(
                     "alpha_agent",
                     self.alpha_agent.mutate_strategy(
@@ -243,7 +287,9 @@ class EvolutionaryLoop:
                     ),
                     timeout=60,
                 )
+                self._add_log("AlphaAgent: Mutation submitted to lineage.")
             except Exception as exc:
+                self._add_log(f"AlphaAgent mutation failed: {exc}", "ERROR")
                 errors.append(
                     self._build_error_log(
                         agent_name="alpha_agent",
@@ -257,6 +303,7 @@ class EvolutionaryLoop:
                     )
                 )
 
+        self._add_log(f"--- Cycle {cycle_id[:8]} Complete ---")
         return self._build_cycle_result(
             cycle_id, started_at,
             strategies_generated, strategies_approved,
@@ -326,3 +373,7 @@ class EvolutionaryLoop:
             strategies_rejected=strategies_rejected,
             errors=errors,
         )
+
+    def get_logs(self) -> list[dict]:
+        """Return the current log buffer."""
+        return list(self._logs)

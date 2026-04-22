@@ -20,6 +20,7 @@ export class PortfolioManager {
       aiRethinkInterval: 60,       // minutes — how often AI re-evaluates strategy per bot
       consecutiveSLLimit: 3,       // fire bot after N consecutive SL hits
       reviewIntervalHours: 1,      // how often fleet checks bot performance
+      autoVaultPct: 20,            // % of realized profit to move to vault
       lastScanTime: 0,
       ...(options.config || {})
     };
@@ -27,9 +28,19 @@ export class PortfolioManager {
     this.timer = null;
     this.currentAction = 'Idle';
     this.logs = [];
+    this.isScanning = false;
+  }
+
+
+  _getExchange() {
+    if (this.config.exchange === 'binance_live' && this.botManager.liveExchange) {
+        return this.botManager.liveExchange;
+    }
+    return this.exchange;
   }
 
   setExchange(exchange) {
+
     this.exchange = exchange;
   }
 
@@ -137,6 +148,9 @@ export class PortfolioManager {
       // count ONLY bots managed by this instance for fleet scaling
       const activeFleet = bots.filter(b => b.isRunning && b.config.managedBy === this.managerId);
       
+      // 0. Profit Vaulting (Locking in gains)
+      await this._handleProfitVaulting(activeFleet);
+
       this.currentAction = '🛡️ Checking Risk...';
       const totalNetPnl = bots.reduce((sum, b) => sum + (b.netPnl || 0), 0);
       const budget = this.config.totalBudget;
@@ -190,8 +204,10 @@ export class PortfolioManager {
     const binanceCfg = loadBinanceConfig();
     if (!binanceCfg.openRouterKey) return;
 
+    const svc = this._getExchange();
     // A. AI Scan for best symbols + Quantitative Data
-    const tickers = await this.exchange.get24hTickers();
+    const tickers = await svc.get24hTickers();
+
     let topByVol = tickers
       .filter((t) => t.symbol.endsWith('USDT'))
       .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
@@ -201,8 +217,9 @@ export class PortfolioManager {
     this.log(`Fetching Mikrostructure for top 40 candidates...`);
     const enhancedTickers = await Promise.all(topByVol.map(async (t) => {
       try {
-        const oiData = await this.exchange.getOpenInterest(t.symbol);
-        const oiStats = await this.exchange.getOpenInterestStatistics(t.symbol, '15m', 96); // ~24h
+        const oiData = await svc.getOpenInterest(t.symbol);
+        const oiStats = await svc.getOpenInterestStatistics(t.symbol, '15m', 96); // ~24h
+
         
         // Calculate 24h OI Delta
         const startOi = oiStats.length > 0 ? parseFloat(oiStats[0].sumOpenInterest) : parseFloat(oiData.openInterest);
@@ -252,10 +269,11 @@ export class PortfolioManager {
       this.currentAction = `🚀 Deploying ${item.symbol}...`;
       
       try {
-        const klines = await this.exchange.getKlines(item.symbol, '1h', 100);
+        const klines = await svc.getKlines(item.symbol, '1h', 100);
         const closes = klines.map(k => parseFloat(k[4]));
-        const fr = await this.exchange.getFundingRate(item.symbol);
-        const oi = await this.exchange.getOpenInterest(item.symbol);
+        const fr = await svc.getFundingRate(item.symbol);
+        const oi = await svc.getOpenInterest(item.symbol);
+
         
         const microstructure = {
           fundingRate: (parseFloat(fr.lastFundingRate) * 100).toFixed(4) + '%',
@@ -273,7 +291,12 @@ export class PortfolioManager {
         );
 
         const weight = (item.score || 70) / totalScore;
-        const allocatedBudget = (averageBudget * count) * weight;
+        let allocatedBudget = (averageBudget * count) * weight;
+        
+        // Safety: Ensure minimum notional for Binance (Min 5 USDT, we use 6 for buffer)
+        if (allocatedBudget < 6) {
+          allocatedBudget = 6;
+        }
         
         const botConfig = {
           symbol: item.symbol,
@@ -288,8 +311,9 @@ export class PortfolioManager {
           aiReason: `[Quant Fleet] ${recommendedStrategy.entry_reason || recommendedStrategy.reason || 'Microstructure analysis'}`,
           aiModel: this.config.aiModel || binanceCfg.openRouterModel,
           aiType: this.config.riskMode,
-          exchange: 'binance_testnet',
+          exchange: this.config.exchange || (process.env.BINANCE_USE_TESTNET === 'false' ? 'binance_live' : 'binance_testnet'),
           managedBy: this.managerId,
+
           // Map entry steps from AI recommendation
           entry_steps: recommendedStrategy.entry_steps || null,
           // Map grid boundaries (AI returns snake_case, engine uses camelCase)
@@ -302,6 +326,31 @@ export class PortfolioManager {
         this.log(`Successfully recruited ${item.symbol} (${recommendedStrategy.strategy})`, 'info');
       } catch (e) {
         this.log(`Failed deep analysis/start for ${item.symbol}: ${e.message}`, 'warn');
+      }
+    }
+  }
+
+  async _handleProfitVaulting(activeFleet) {
+    const vaultPct = this.config.autoVaultPct || 0;
+    if (vaultPct <= 0) return;
+
+    for (const bot of activeFleet) {
+      if (bot.realizedPnl > 0) {
+        const toVault = bot.realizedPnl * (vaultPct / 100);
+        if (toVault >= 0.1) {
+          this.log(`💰 Vaulting profit from ${bot.config.symbol}: $${toVault.toFixed(2)} (${vaultPct}%)`, 'info');
+          
+          // Deduct from bot's available trading capital
+          bot.currentCash -= toVault;
+          // We don't subtract from realizedPnl here because it's a "total" stat, 
+          // instead we handle the vaulting state in the fleet.
+          // But to prevent double-vaulting, we need a way to track what was already vaulted.
+          bot.vaultedProfit = (bot.vaultedProfit || 0) + toVault;
+          bot.realizedPnl -= toVault; // By lowering realizedPnl, we effectively "harvest" it.
+
+          const { addToFleetVault } = await import('../../data-layer/src/index.js');
+          addToFleetVault(this.managerId, toVault);
+        }
       }
     }
   }

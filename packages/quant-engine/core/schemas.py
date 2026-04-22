@@ -19,6 +19,18 @@ class SentimentResult(BaseModel):
     components: dict[str, float]    # {"funding_component": x, "oi_component": y}
 
 
+class NewsResult(BaseModel):
+    id: int | None = None
+    title: str
+    title_th: str | None = None
+    summary: str
+    summary_th: str | None = None
+    impact_score: int               # [-10, 10]
+    source: str
+    url: str
+    timestamp: str
+
+
 # ─── OHLCV ────────────────────────────────────────────────────────────────────
 
 class OHLCVMetadata(BaseModel):

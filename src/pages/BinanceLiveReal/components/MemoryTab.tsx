@@ -25,6 +25,13 @@ export default function MemoryTab({ tradeMemory }: Props) {
                 <div>Reason: <span style={{ color: '#eee' }}>{t.reason}</span></div>
                 <div>Closed At: <span style={{ color: '#eee' }}>{new Date(t.exitTime).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}</span></div>
               </div>
+
+              {t.aiLesson && (
+                <div style={{ marginTop: '1rem', padding: '0.75rem', background: 'rgba(250, 173, 20, 0.05)', borderRadius: '6px', borderLeft: '3px solid #faad14', fontSize: '0.85rem' }}>
+                  <div style={{ color: '#faad14', fontWeight: 'bold', fontSize: '0.65rem', marginBottom: '0.25rem', textTransform: 'uppercase' }}>🧠 AI Lesson Learned:</div>
+                  <p style={{ margin: 0, color: '#eee', fontStyle: 'italic', lineHeight: '1.4' }}>"{t.aiLesson}"</p>
+                </div>
+              )}
             </div>
           ))
         )}
