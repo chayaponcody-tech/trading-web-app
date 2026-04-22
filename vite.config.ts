@@ -11,8 +11,18 @@ export default defineConfig({
         target: 'http://localhost:4001',
         changeOrigin: true,
         secure: false,
-        timeout: 120000,
-        proxyTimeout: 120000,
+      },
+      '/quant': {
+        target: 'http://localhost:8002',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/quant/, ''),
+      },
+      '/poly': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/poly/, ''),
       }
     }
   },

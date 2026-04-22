@@ -88,13 +88,17 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
 
   // ─── Strategy AI Log Level ────────────────────────────────────────────────
   r.get('/strategy-ai/log-level', async (req, res) => {
+    const { strategyAiUrl } = loadBinanceConfig();
     try {
-      const { strategyAiUrl } = loadBinanceConfig();
-      const response = await fetch(`${strategyAiUrl}/admin/log-level`, { signal: AbortSignal.timeout(4000) });
+      const target = `${strategyAiUrl}/admin/log-level`;
+      console.log(`📡 [Gateway] Fetching log level from: ${target}`);
+      const response = await fetch(target, { signal: AbortSignal.timeout(4000) });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       res.json(data);
-    } catch {
-      res.status(503).json({ error: 'Strategy AI service unavailable' });
+    } catch (e) {
+      console.error(`❌ [Gateway] Strategy AI log-level fetch failed:`, e.message);
+      res.status(503).json({ error: 'Strategy AI service unavailable', details: e.message });
     }
   });
 

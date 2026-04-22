@@ -146,7 +146,7 @@ export default function MarketAnalysis() {
   const handleManualRefresh = async () => {
     if (!chartRef.current || isRefreshing) return;
     setIsRefreshing(true);
-    await chartRef.current.loadKlines({ symbol, interval, strategyId: selectedStrategyId });
+    await chartRef.current.loadKlines({ symbol, interval, strategyId: selectedStrategyId } as any);
     await fetchMarketFeatures(symbol, interval);
     setTimeout(() => setIsRefreshing(false), 500);
   };
@@ -155,7 +155,7 @@ export default function MarketAnalysis() {
     if (!autoRefresh) return;
     const timer = window.setInterval(() => {
       if (chartRef.current) {
-        chartRef.current.loadKlines({ symbol, interval, strategyId: selectedStrategyId });
+        chartRef.current.loadKlines({ symbol, interval, strategyId: selectedStrategyId } as any);
         fetchMarketFeatures(symbol, interval);
       }
     }, 5000);
@@ -174,7 +174,7 @@ export default function MarketAnalysis() {
 
   useEffect(() => {
     if (chartRef.current) {
-       chartRef.current.loadKlines({ symbol, interval, strategyId: selectedStrategyId });
+       chartRef.current.loadKlines({ symbol, interval, strategyId: selectedStrategyId } as any);
        fetchMarketFeatures(symbol, interval);
     }
   }, [symbol, interval, selectedStrategyId]);

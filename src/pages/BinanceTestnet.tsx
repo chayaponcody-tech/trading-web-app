@@ -22,10 +22,14 @@ const STRATEGIES = [
 
 const INTERVALS = ['5m', '15m', '1h', '4h', '1d'];
 
+interface OpenPosition {
   entryReason?: string;
   quantity: number;
   dynamicTp?: number;
   dynamicSl?: number;
+  type: string;
+  entryPrice: number;
+  entryTime?: string;
 }
 
 interface Trade {
@@ -1661,9 +1665,9 @@ export default function BinanceTestnet() {
                                   return (
                                     <>
                                       <div style={{ fontSize: '0.75rem', color: '#faad14', maxWidth: '180px', lineHeight: '1.4' }}>{entryReason}</div>
-                                      {lastUpdated && (
+                                      {linkedBot?.lastAiCheck && (
                                         <div style={{ fontSize: '0.6rem', color: '#888', marginTop: '0.2rem' }}>
-                                          ⏱️ AI update: {new Date(lastUpdated).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                          ⏱️ AI update: {new Date(linkedBot.lastAiCheck).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                         </div>
                                       )}
                                     </>

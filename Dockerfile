@@ -45,6 +45,14 @@ RUN echo 'server { \
     location /api { \
         proxy_pass http://backend:4001; \
     } \
+    # Forward Quant Engine requests \
+    location /quant/ { \
+        proxy_pass http://quant-engine:8002/; \
+    } \
+    # Forward Strategy AI requests \
+    location /strategy-ai/ { \
+        proxy_pass http://strategy-ai:8000/; \
+    } \
 }' > /etc/nginx/conf.d/default.conf
 EXPOSE 80
 CMD ["nginx", "-g", "daemon off;"]

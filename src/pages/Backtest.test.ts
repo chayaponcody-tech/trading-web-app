@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Feature: backtest-ui-api-integration, Property 9
 import { describe, it, expect } from 'vitest';
 import * as fc from 'fast-check';

@@ -18,6 +18,7 @@ interface FeatureData {
     technicals: any;
     quant: any;
     microstructure: any;
+    onchain: any;
   };
 }
 

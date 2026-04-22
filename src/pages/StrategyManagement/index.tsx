@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, KeyboardEvent } from 'react';
+import { useState, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { Tag, X, Loader2 } from 'lucide-react';
 import type { StrategyDefinition, MultiAssetBacktestResult, RandomWindowBacktestResult } from '../../types/strategy';
 import { getStrategies, deleteStrategy, runMultiAssetBacktest, runRandomWindowBacktest } from '../../api/strategyApi';
@@ -656,12 +656,23 @@ function RandomWindowBacktestForm({ onResult }: RandomWindowBacktestFormProps) {
   const [windowDays, setWindowDays] = useState<number | ''>(30);
   const [lookbackYears, setLookbackYears] = useState<number | ''>(1);
   const [numWindows, setNumWindows] = useState<number | ''>(5);
+  // Dynamic strategy-specific params
+  const [strategyParams, setStrategyParams] = useState<Record<string, number | string>>({});
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [symbolsError, setSymbolsError] = useState<string | null>(null);
   const [windowDaysError, setWindowDaysError] = useState<string | null>(null);
   const [lookbackYearsError, setLookbackYearsError] = useState<string | null>(null);
   const [numWindowsError, setNumWindowsError] = useState<string | null>(null);
+
+  // Reset params when strategy changes
+  const handleStrategyChange = (key: string) => {
+    setStrategyKey(key);
+    const strategy = strategyList.find(s => (s.id || s.key) === key);
+    const dynamicDefaults = Object.fromEntries((strategy?.parameters || []).map((p: any) => [p.key, p.default]));
+    const staticDefaults = getDefaultParams(key);
+    setStrategyParams({ ...staticDefaults, ...dynamicDefaults });
+  };
 
   function handleWindowDaysChange(val: string) {
     const n = val === '' ? '' : Number(val);
@@ -872,7 +883,7 @@ function RandomWindowBacktestForm({ onResult }: RandomWindowBacktestFormProps) {
 
 // ─── Convert built-in StrategyEntry → StrategyDefinition for display ──────────
 
-function entryToDefinition(entry: { key: string; engine: 'js' | 'python'; description: string; tags: string[]; id?: string }): StrategyDefinition {
+function entryToDefinition(entry: any): StrategyDefinition {
   const isHardcoded = JS_STRATEGIES.some(s => s.key.toUpperCase() === entry.key.toUpperCase());
   return {
     id: entry.id ?? (isHardcoded ? `builtin:${entry.key}` : entry.key),

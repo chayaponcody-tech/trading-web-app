@@ -286,7 +286,7 @@ function CreateFleetModal({ onClose, onCreate, isLive, availableCash }: any) {
             </select>
           </Field>
           <Field label="AI Re-think Interval">
-            <select className="styled-input" style={{ width: '100%' }} value={rethinkInterval} onChange={e => setRETHINK_INTERVALS.find(r => r.value === rethinkInterval)?.label || rethinkInterval} onChange={e => setRethinkInterval(+e.target.value)}>
+            <select className="styled-input" style={{ width: '100%' }} value={rethinkInterval} onChange={e => setRethinkInterval(+e.target.value)}>
               {RETHINK_INTERVALS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
             </select>
           </Field>

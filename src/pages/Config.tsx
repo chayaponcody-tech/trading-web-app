@@ -3,8 +3,8 @@ import { AI_MODELS } from '../constants/aiModels';
 import { Settings, Shield, Cpu, Key, Brain, TrendingUp, Activity, Zap, RefreshCw, Globe } from 'lucide-react';
 
 const API = '';
-const POLY_API = 'http://localhost:8080';
-const QUANT_URL = 'http://localhost:8002';
+const POLY_API = '/poly'; // Use proxy if available
+let QUANT_URL = '/quant'; // Use Nginx proxy
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -96,8 +96,32 @@ export default function ConfigPage() {
       if (!res.ok) throw new Error(await res.text());
       setQuantSaved(true);
       setTimeout(() => setQuantSaved(false), 2000);
+      
+      // Auto-save the platform config as well to ensure URLs stay in sync
+      await handleSaveCrypto();
     } catch (e: any) { alert('Quant Save Error: ' + e.message); }
     setQuantSaving(false);
+  };
+
+  const applyEnvironmentPreset = (mode: 'local' | 'docker') => {
+    if (mode === 'local') {
+      setQuantCfg(prev => ({
+        ...prev,
+        backend_url: 'http://localhost:4001',
+        strategy_ai_url: 'http://localhost:8000',
+      }));
+      setCfg(prev => ({ ...prev, strategyAiUrl: 'http://localhost:8000' }));
+    } else {
+      setQuantCfg(prev => ({
+        ...prev,
+        backend_url: 'http://backend:4001',
+        strategy_ai_url: 'http://strategy-ai:8000',
+      }));
+      setCfg(prev => ({ ...prev, strategyAiUrl: 'http://strategy-ai:8000' }));
+    }
+    // Added a small notification to remind user to save
+    const msg = mode === 'local' ? 'Switched to Local Dev presets' : 'Switched to Docker Cluster presets';
+    console.log(msg + '. Please remember to Save Platform Configuration at the bottom.');
   };
 
   const fetchCryptoCfg = async () => {
@@ -123,11 +147,17 @@ export default function ConfigPage() {
   const pingStrategyAi = async () => {
     setPinging(true);
     try {
-      const res = await fetch(`${API}/api/config/strategy-ai/status`);
+      const res = await fetch('/api/config/strategy-ai/status');
       const data = await res.json();
       setStrategyAiStatus({ online: data.online, lastCheck: data.lastCheck });
     } catch {
-      setStrategyAiStatus({ online: false, lastCheck: new Date().toISOString() });
+      // Fallback: try direct proxy
+      try {
+        const res = await fetch('/strategy-ai/health');
+        setStrategyAiStatus({ online: res.ok, lastCheck: new Date().toISOString() });
+      } catch {
+        setStrategyAiStatus({ online: false, lastCheck: new Date().toISOString() });
+      }
     }
     setPinging(false);
   };
@@ -147,9 +177,16 @@ export default function ConfigPage() {
       if (view === 'admin') {
         fetchQuantCfg();
         fetch(`${POLY_API}/api/config`)
-          .then(r => { setPolyOnline(r.ok); return r.json(); })
+          .then(r => { 
+            setPolyOnline(r.ok); 
+            if (r.ok) return r.json();
+            throw new Error('Poly offline');
+          })
           .then(d => setPolyCfg(prev => ({ ...prev, ai_model: d.ai_model ?? '', confidence_threshold: d.confidence_threshold ?? 0.72, max_bet: d.max_bet ?? 3.0, use_rag_context: d.use_rag_context !== 0 })))
-          .catch(() => setPolyOnline(false));
+          .catch(() => {
+            setPolyOnline(false);
+            console.log('Polymarket service not detected at ' + POLY_API);
+          });
       }
     }, [view, activeTab]);
 
@@ -397,7 +434,20 @@ export default function ConfigPage() {
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <Cpu size={24} /> Microservice Architecture
               </span>
-              <div style={{ display: 'flex', gap: '1rem' }}>
+              <div style={{ display: 'flex', gap: '0.8rem', alignItems: 'center' }}>
+                <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', padding: '2px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                  <button 
+                    onClick={() => applyEnvironmentPreset('local')}
+                    style={{ padding: '0.3rem 0.6rem', background: quantCfg.backend_url.includes('localhost') ? 'rgba(255,255,255,0.1)' : 'transparent', border: 'none', color: quantCfg.backend_url.includes('localhost') ? '#fff' : '#666', borderRadius: '4px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 'bold' }}>
+                    🏠 Local Dev
+                  </button>
+                  <button 
+                    onClick={() => applyEnvironmentPreset('docker')}
+                    style={{ padding: '0.3rem 0.6rem', background: quantCfg.backend_url.includes('backend') ? 'rgba(167, 139, 250, 0.2)' : 'transparent', border: 'none', color: quantCfg.backend_url.includes('backend') ? '#a78bfa' : '#666', borderRadius: '4px', cursor: 'pointer', fontSize: '0.65rem', fontWeight: 'bold' }}>
+                    🐳 Docker Cluster
+                  </button>
+                </div>
+                <div style={{ width: '1px', height: '20px', background: 'rgba(255,255,255,0.1)', margin: '0 0.5rem' }} />
                 {quantOnline !== null && (
                   <span style={{ fontSize: '0.8rem', color: quantOnline ? '#0ecb81' : '#f6465d' }}>
                     Quant: {quantOnline ? '● Online' : '● Offline'}

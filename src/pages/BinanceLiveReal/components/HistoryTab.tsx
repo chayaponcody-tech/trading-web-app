@@ -1,7 +1,8 @@
-import { useState } from 'react';
+﻿import { useState } from 'react';
 import { SummaryStat } from './StatWidgets';
 
-// ─── History Tab ───────────────────�interface Props {
+// ─── History Tab Interface ──────────────────────────────────────────────────
+interface Props {
   tradeHistory: any[];
   fetchingHistory: boolean;
   fetchHistory: () => void;
@@ -42,7 +43,7 @@ export default function HistoryTab({ tradeHistory, fetchingHistory, fetchHistory
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.2rem' }}>
-          <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: '800', letterSpacing: '-0.5px', color: '#fff' }}>Archives 📜</h2>
+          <h2 style={{ margin: 0, fontSize: '1.4rem', fontWeight: '800', letterSpacing: '-0.5px', color: '#fff' }}>Archives 📂</h2>
           
           {/* Date Filter */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0.3rem 0.8rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)' }}>
@@ -54,7 +55,7 @@ export default function HistoryTab({ tradeHistory, fetchingHistory, fetchHistory
               style={{ background: 'transparent', color: '#faad14', border: 'none', fontSize: '0.8rem', outline: 'none', cursor: 'pointer', fontWeight: 'bold', colorScheme: 'dark' }}
             />
             {selectedDate !== 'all' && (
-              <button onClick={() => setSelectedDate('all')} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: '0.65rem', width: '18px', height: '18px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+              <button onClick={() => setSelectedDate('all')} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', fontSize: '0.65rem', width: '18px', height: '18px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>×</button>
             )}
           </div>
 
@@ -91,11 +92,8 @@ export default function HistoryTab({ tradeHistory, fetchingHistory, fetchHistory
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.2rem' }}>
         <SummaryStat icon="📊" label="Total Trades" value={filtered.length} sub={`${wins}W - ${losses}L`} />
         <SummaryStat icon="💰" label="Net Profit" value={`$${totalPnL.toFixed(2)}`} color={totalPnL >= 0 ? '#0ecb81' : '#f6465d'} sub={totalPnL >= 0 ? 'Profitable Session' : 'Loss Session'} />
-        <SummaryStat icon="🎯" label="Avg Win Rate" value={`${winRate}%`} color="#faad14" sub="Accuracy Score" />
-        <SummaryStat icon="⏱️" label="Date Context" value={selectedDate === 'all' ? 'Historical' : selectedDate} sub={`Filter: ${filterType}`} />
-      </div>
-iv>
-     <SummaryStat icon="⏱️" label="Date Context" value={selectedDate === 'all' ? 'Historical' : selectedDate} sub="Analysis Range" />
+        <SummaryStat icon="📈" label="Avg Win Rate" value={`${winRate}%`} color="#faad14" sub="Accuracy Score" />
+        <SummaryStat icon="📅" label="Date Context" value={selectedDate === 'all' ? 'Historical' : selectedDate} sub={`Filter: ${filterType}`} />
       </div>
 
       {/* Trade List */}

@@ -259,7 +259,7 @@ export default function BinanceLive({ isRealMode = false }: { isRealMode?: boole
     if (!aiRecommendation) return;
     
     // Check if we are adopting an existing position (the symbol should be in activePositions but no managed bot)
-    const isAdopting = activePositions.some(p => normalizeSymbol(p.symbol) === normalizeSymbol(aiRecommendation.symbol)) && 
+    const isAdopting = activePositions.some((p: any) => normalizeSymbol(p.symbol) === normalizeSymbol(aiRecommendation.symbol)) && 
                        !bots.some(b => normalizeSymbol(b.config.symbol) === normalizeSymbol(aiRecommendation.symbol) && b.isRunning);
 
     handleStart({

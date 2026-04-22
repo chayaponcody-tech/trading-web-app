@@ -220,8 +220,16 @@ const CandleChart = forwardRef<CandleChartHandle, CandleChartProps>(function Can
     
     const observer = new ResizeObserver(entries => {
       if (!entries || entries.length === 0 || !candleChartRef.current) return;
-      const { width, height } = entries[0].contentRect;
-      candleChartRef.current.applyOptions({ width, height });
+      
+      // Safety check: don't resize if chart was removed
+      try {
+        const { width, height } = entries[0].contentRect;
+        if (width > 0 && height > 0) {
+          candleChartRef.current.applyOptions({ width, height });
+        }
+      } catch (e) {
+        console.warn('Chart resize failed (likely disposed):', e);
+      }
     });
     
     observer.observe(container);

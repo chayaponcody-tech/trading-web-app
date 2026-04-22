@@ -32,8 +32,9 @@ export interface OverlayZone {
   endTime?: string;
   top: number;
   bottom: number;
-  type: 'OB' | 'BB' | 'MT' | 'HOB';
+  type: 'OB' | 'BB' | 'MT' | 'HOB' | 'FVG_UP' | 'FVG_DOWN' | 'OB_UP' | 'OB_DOWN';
   mid?: number;
+  styles?: any;
 }
 
 export interface OverlayData {
@@ -83,6 +84,8 @@ export interface BacktestConfig {
   capital: number;
   startDate?: string;
   endDate?: string;
+  forceEngine?: 'js' | 'python';
+  [key: string]: any;
 }
 
 export interface BacktestResult {
@@ -102,6 +105,7 @@ export interface BacktestResult {
   profitFactor: number;
   avgWin: number;
   avgLoss: number;
+  maxConsecutiveWins: number;
   maxConsecutiveLosses: number;
   equityCurve: EquityCurvePoint[];
   trades: Trade[];
