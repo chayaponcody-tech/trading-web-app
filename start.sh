@@ -27,11 +27,19 @@ setup_python_env() {
     cd "$service_path"
     
     # Check for venv directory
+    if [ -d "venv" ]; then
+        # Check if it's broken (no python executable)
+        if [ ! -f "venv/bin/python3" ] && [ ! -f "venv/bin/python" ]; then
+            echo -e "\033[31m⚠️ Found broken venv for $service_name. Removing...\033[0m" >&2
+            rm -rf venv
+        fi
+    fi
+
     if [ ! -d "venv" ]; then
         echo -e "\033[33m🐍 Creating virtual environment for $service_name...\033[0m" >&2
         if ! python3 -m venv venv 2>/dev/null; then
-            echo -e "\033[31m❌ Error: Failed to create venv. Please run: sudo apt update && sudo apt install python3-venv\033[0m" >&2
-            # Fallback to system python if venv fails
+            echo -e "\033[31m❌ Error: Failed to create venv. Please run: sudo apt update && sudo apt install python3-venv -y\033[0m" >&2
+            # Fallback to system python
             echo "python3"
             return
         fi
