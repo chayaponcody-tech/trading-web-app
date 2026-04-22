@@ -23,19 +23,31 @@ fi
 setup_python_env() {
     local service_path=$1
     local service_name=$2
-    # Log to stderr so it doesn't get captured in $(...)
     echo -e "\033[36m[System] Checking Python environment for $service_name...\033[0m" >&2
     cd "$service_path"
     
-    # Check for venv
+    # Check for venv directory
     if [ ! -d "venv" ]; then
         echo -e "\033[33m🐍 Creating virtual environment for $service_name...\033[0m" >&2
-        python3 -m venv venv
+        if ! python3 -m venv venv 2>/dev/null; then
+            echo -e "\033[31m❌ Error: Failed to create venv. Please run: sudo apt update && sudo apt install python3-venv\033[0m" >&2
+            # Fallback to system python if venv fails
+            echo "python3"
+            return
+        fi
     fi
     
-    # Use absolute path for venv python
-    local P_EXE="$service_path/venv/bin/python3"
-    if [ ! -f "$P_EXE" ]; then P_EXE="$service_path/venv/bin/python"; fi
+    # Identify the correct python executable inside venv
+    local P_EXE=""
+    if [ -f "venv/bin/python3" ]; then
+        P_EXE="$(pwd)/venv/bin/python3"
+    elif [ -f "venv/bin/python" ]; then
+        P_EXE="$(pwd)/venv/bin/python"
+    else
+        echo -e "\033[31m⚠️ Warning: venv found but python executable missing. Using system python3.\033[0m" >&2
+        echo "python3"
+        return
+    fi
     
     # Verify uvicorn exists in venv, otherwise install requirements
     if ! "$P_EXE" -m uvicorn --version >/dev/null 2>&1; then
@@ -47,7 +59,7 @@ setup_python_env() {
             "$P_EXE" -m pip install fastapi uvicorn[standard]
         fi
     fi
-    # Output ONLY the path to stdout
+    # Output ONLY the absolute path to stdout
     echo "$P_EXE"
 }
 
