@@ -20,3 +20,8 @@ dist-ssr
 *-apikey.txt
 .env
 .env.local
+*.zip
+trading_app_source.zip
+trading_app.db
+trading_app.db-shm
+trading_app.db-wal

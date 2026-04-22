@@ -348,8 +348,8 @@ process.on('uncaughtException',  (e) => console.error('[FATAL]', e));
 process.on('unhandledRejection', (e) => console.error('[UNHANDLED]', e));
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`🚀 API Gateway running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 API Gateway running on http://0.0.0.0:${PORT}`);
   console.log(`📦 Packages: exchange-connector, bot-engine, ai-agents, data-layer`);
 });
 
