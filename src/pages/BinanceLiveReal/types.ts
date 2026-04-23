@@ -102,6 +102,7 @@ export interface Bot {
   reflectionStatus?: string | null;
   reflectionHistory?: any[];
   currentThought?: string;
+  lastEntryReason?: string;
   lastThoughtAt?: string;
   durationMinutes?: number;
 }

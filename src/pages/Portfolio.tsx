@@ -738,7 +738,10 @@ export default function Portfolio({ mode = 'test' }: { mode?: 'test' | 'live' })
         }
       }
 
-      setFleets(enriched);
+      setFleets(enriched.map((f: any) => ({
+        ...f,
+        minConfidence: f.minConfidence ?? f.config?.minConfidence ?? 70
+      })));
       setBots(filteredBots);
       setMistakes(mistakesData);
 

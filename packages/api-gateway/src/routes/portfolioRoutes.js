@@ -324,17 +324,26 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
 
       if (minConfidence === undefined) return res.status(400).json({ error: 'minConfidence is required' });
 
-      // 1. Update Database
-      await db.execute(
-        'UPDATE fleets SET minConfidence = ? WHERE id = ?',
-        [minConfidence, id]
-      );
+      const fleet = getFleetById(id);
+      if (!fleet) return res.status(404).json({ error: 'Fleet not found' });
 
-      // 2. Update Live Engine (If active)
+      const confidenceValue = Number(minConfidence);
+      if (Number.isNaN(confidenceValue)) {
+        return res.status(400).json({ error: 'minConfidence must be a number' });
+      }
+
+      // Persist minConfidence inside the fleet config JSON.
+      fleet.config = {
+        ...fleet.config,
+        minConfidence: confidenceValue
+      };
+      upsertFleet(fleet);
+
+      // Update Live Engine (If active)
       const pm = portfolioManagers.get(id);
       if (pm) {
-        pm.config.minConfidence = parseFloat(minConfidence);
-        console.info(`[Fleet] Updated LIVE fleet ${id} minConfidence to ${minConfidence}%`);
+        pm.config.minConfidence = confidenceValue;
+        console.info(`[Fleet] Updated LIVE fleet ${id} minConfidence to ${confidenceValue}%`);
       }
 
       res.json({ success: true, message: 'Settings updated' });

@@ -193,6 +193,7 @@ export function createBotRoutes(botManager) {
           openPositions: (bot.openPositions || []).length,
           currentPrice: bot.currentPrice || 0,
           lastSignal: bot.lastSignal,
+          lastEntryReason: bot.lastEntryReason,
           startedAt: bot.startedAt,
           aiReason: bot.aiReason,
           managedBy: bot.config?.managedBy || bot.managedBy || null,

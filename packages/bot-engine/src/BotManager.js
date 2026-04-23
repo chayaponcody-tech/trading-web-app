@@ -440,6 +440,10 @@ export class BotManager {
           signal = computeSignal(closes, strategy, bot.config);
         }
         bot.lastSignal = signal;
+        if (signal === 'NONE' && bot.openPositions.length === 0) {
+          bot.currentThought = `Waiting: ${strategy} ยังไม่ให้สัญญาณเข้า`;
+          bot.lastThoughtAt = new Date().toISOString();
+        }
 
         // ── Alpha Decay Exit (Feature #4) ─────────────────────────────────
         // Close immediately on opposite signal OR significant confidence drop
@@ -461,6 +465,7 @@ export class BotManager {
               const aiResult = await this._strategyAiFilter(bot, signal, closes, currPrice);
               if (!aiResult.approved) {
                 bot.currentThought = `🤖 [Strategy AI Block] ${aiResult.reason}`;
+                bot.lastEntryReason = `[BLOCKED] ${aiResult.reason}`;
                 bot.lastThoughtAt = new Date().toISOString();
                 console.log(`[Bot ${botId}] ${this._mode(bot)} Entry blocked by Strategy AI: ${aiResult.reason}`);
               } else {
@@ -514,12 +519,17 @@ export class BotManager {
               const microOk = await this._checkMicrostructure(bot, symbol, signal);
               if (!microOk.pass) {
                 bot.currentThought = `⚠️ [Microstructure Block] ${microOk.reason}`;
+                bot.lastEntryReason = `[BLOCKED] ${microOk.reason}`;
                 bot.lastThoughtAt = new Date().toISOString();
               } else {
                 await this._openPosition(bot, signal, currPrice, closes);
               }
             }
           } else {
+            const remainingMs = cooldownMinutes * 60_000 - (Date.now() - lastExit);
+            const remainingMins = Math.max(1, Math.ceil(remainingMs / 60_000));
+            bot.currentThought = `Cooldown active: รออีก ${remainingMins} นาที ก่อนเข้า ${signal}`;
+            bot.lastThoughtAt = new Date().toISOString();
             console.log(`[Bot ${botId}] Entry skipped: Cooldown active`);
           }
         }

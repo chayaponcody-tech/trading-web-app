@@ -102,6 +102,7 @@ export interface Bot {
   reflectionStatus?: string | null;
   reflectionHistory?: any[];
   currentThought?: string;
+  lastEntryReason?: string;
   lastThoughtAt?: string;
   durationMinutes?: number;
 }
@@ -129,4 +130,3 @@ export const formatPrice = (val: number) => {
 
 export const normalizeSymbol = (s: string) => 
   s ? s.replace('/', '').replace(':USDT', '').replace(':USD', '').trim().toUpperCase() : '';
-

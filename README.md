@@ -73,6 +73,45 @@
     - API: `http://localhost:4001`
     - Strategies metadata: `http://localhost:4000/strategies`
 
+### PM2 Start
+
+ถ้าต้องการรันแบบ process manager ให้ใช้ `pm2` แทน `start.ps1`
+
+1. ติดตั้ง `pm2`
+    ```powershell
+    npm.cmd install -g pm2
+    ```
+2. build frontend ก่อน
+    ```powershell
+    npm.cmd run build
+    ```
+3. start ทุก service
+    ```powershell
+    .\pm2-start.ps1
+    ```
+4. ดูสถานะ / logs
+    ```powershell
+    pm2.cmd status
+    pm2.cmd logs
+    ```
+5. ถ้าต้องการให้ process list คงอยู่
+    ```powershell
+    pm2.cmd save
+    ```
+
+ถ้าต้องการ stop
+```powershell
+.\pm2-stop.ps1
+```
+
+Services ที่ถูก start จาก `pm2`
+- `trading-frontend` ที่ `http://localhost:4000`
+- `trading-api` ที่ `http://localhost:4001`
+- `strategy-ai` ที่ `http://localhost:8000`
+- `quant-engine` ที่ `http://localhost:8002`
+- `polymarket-dashboard` ที่ `http://localhost:8080`
+- `polymarket-agent` แบบ `--dry-run` เป็นค่าเริ่มต้น
+
 ---
 
 ## 📡 Key API Endpoints

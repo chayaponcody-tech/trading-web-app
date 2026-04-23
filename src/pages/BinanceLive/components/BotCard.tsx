@@ -17,6 +17,7 @@ interface Props {
 }
 
 export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onToggle, onReview, onOptimize, viewMode, onViewChart, exchangePositions }: Props) {
+  const thoughtText = bot.currentThought || bot.lastEntryReason || 'Scanning...';
   const [editingInterval, setEditingInterval] = useState<number>(bot.config.aiCheckInterval || 0);
   const [isUpdating, setIsUpdating] = useState(false);
   const [activeTab, setActiveTab] = useState<'trades' | 'positions' | 'ai' | 'reflect'>('trades');
@@ -134,7 +135,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.6rem', overflow: 'hidden' }}>
           <span style={{ fontSize: '0.9rem', opacity: bot.isRunning ? 1 : 0.3 }}>🧠</span>
           <span style={{ fontSize: '0.75rem', color: bot.isRunning ? '#faad14' : '#555', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' }}>
-            {bot.isRunning ? (bot.currentThought || 'Scanning...') : 'Idle...'}
+            {bot.isRunning ? thoughtText : 'Idle...'}
           </span>
         </div>
         <ActionButtons compact />
@@ -177,7 +178,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
           {/* Signal pill */}
           <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
             <div style={{ fontSize: '0.65rem', color: bot.isRunning ? '#faad14' : '#444', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontStyle: 'italic' }}>
-              🧠 {bot.isRunning ? (bot.currentThought || 'Scanning...') : 'Idle'}
+              🧠 {bot.isRunning ? thoughtText : 'Idle'}
             </div>
           </div>
 
@@ -302,7 +303,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
           <div style={{ padding: '0.4rem 1rem 0.5rem', background: 'rgba(250,173,20,0.03)', borderBottom: expanded ? 'none' : '1px solid rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
             <span style={{ fontSize: '0.9rem', opacity: bot.isRunning ? 1 : 0.3, flexShrink: 0 }}>🧠</span>
             <span style={{ fontSize: '0.72rem', color: bot.isRunning ? '#faad14' : '#555', fontStyle: 'italic', lineHeight: '1.4' }}>
-              {bot.isRunning ? (bot.currentThought || 'Scanning...') : 'Idle'}
+              {bot.isRunning ? thoughtText : 'Idle'}
             </span>
             {bot.lastThoughtAt && (
               <span style={{ fontSize: '0.6rem', color: '#444', flexShrink: 0, marginLeft: 'auto' }}>
@@ -427,7 +428,7 @@ export default function BotCard({ bot, onStop, onDelete, onResume, expanded, onT
             {bot.isRunning && <span style={{ color: '#faad14', fontSize: '0.55rem', opacity: 0.6 }}>● SCANNING</span>}
           </div>
           <div style={{ fontSize: '0.85rem', color: bot.isRunning ? '#faad14' : '#555', fontWeight: '600', lineHeight: '1.4' }}>
-            {bot.isRunning ? (bot.currentThought || 'เครื่องยนต์กำลังเตรียมข้อมูล...') : 'บอทหยุดทำงาน'}
+            {bot.isRunning ? thoughtText : 'บอทหยุดทำงาน'}
           </div>
         </div>
       </div>
