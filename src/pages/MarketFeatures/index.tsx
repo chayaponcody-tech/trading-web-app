@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Target, Activity, Zap, TrendingUp, Info, ShieldCheck, Search } from 'lucide-react';
 
-const API = 'http://localhost:4001';
+const API = '/api';
 
 interface FeatureDefinition {
   id: string;

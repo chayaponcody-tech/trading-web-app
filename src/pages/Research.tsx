@@ -35,7 +35,7 @@ export default function ResearchBrain() {
     'General': true
   });
 
-  const API_BASE = 'http://localhost:4001/api/research';
+  const API_BASE = '/api/research';
 
   useEffect(() => {
     fetchFiles();

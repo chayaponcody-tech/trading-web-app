@@ -3,7 +3,7 @@ import { AI_MODELS } from '../constants/aiModels';
 import { TrendingUp, Play, Square, Activity, Clock, CheckCircle, XCircle, RefreshCw, Zap, Brain } from 'lucide-react';
 
 // Point to the Python FastAPI service
-const POLY_API = 'http://localhost:8080';
+const POLY_API = '/api/polymarket';
 
 const SIGNAL_DESCS: Record<string, string> = {
   momentum_1m: "แรงดีดราคาใน 1 นาที (บวก = พุ่งขึ้น / ลบ = พักตัว)",

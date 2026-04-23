@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { TrendingUp, DollarSign, Activity, Brain, Zap } from 'lucide-react';
 import AutoTrendChart from '../components/AutoTrendChart';
 
-const QUANT_URL = 'http://localhost:8002';
+const QUANT_URL = '/api/quant';
 
 interface QuantSentiment {
   symbol: string;

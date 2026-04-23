@@ -4,7 +4,7 @@ import { Settings, Shield, Cpu, Key, Brain, TrendingUp, Activity, Zap, RefreshCw
 
 const API = '';
 const POLY_API = '/poly'; // Use proxy if available
-let QUANT_URL = '/quant'; // Use Nginx proxy
+let QUANT_URL = '/api/quant'; // Use Gateway proxy
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
@@ -24,7 +24,7 @@ export default function ConfigPage() {
 
   // ── Quant Engine state ────────────────────────────────────────────────────
   const [quantCfg, setQuantCfg] = useState({
-    backend_url: 'http://localhost:4001',
+    backend_url: '/api',
     strategy_ai_url: 'http://localhost:8000',
     etl_symbols: 'BTCUSDT,ETHUSDT',
     etl_interval: '15m',

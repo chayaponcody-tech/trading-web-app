@@ -19,7 +19,7 @@ export default function TuningLogs() {
   const fetchLogs = async () => {
     setLoading(true);
     try {
-      const res = await fetch('http://localhost:3001/api/bots/tuning-history');
+      const res = await fetch('/api/bots/tuning-history');
       const data = await res.json();
       setLogs(data);
     } catch (err) {
