@@ -290,15 +290,27 @@ export class BinanceAdapter extends BaseExchange {
   async getLiquidationOrders(symbol, limit = 100) {
     try {
       const formattedSymbol = symbol.toUpperCase().replace('/', '').replace(':USDT', '');
-      // Use fapiPublicGetAllForceOrders or fapiPublicGetForceOrders if available, 
-      // but the most stable is often the explicitly mapped one.
-      // 400 Error "out of maintenance" usually means parameter mismatch.
-      return await this._getPublic().fapiPublicGetAllForceOrders({
+      
+      // Try multiple possible CCXT method names for robustness
+      const pub = this._getPublic();
+      const method = pub.fapiPublicGetAllForceOrders || pub.fapiPublicGetForceOrders;
+      
+      if (typeof method === 'function') {
+        return await method.call(pub, {
+          symbol: formattedSymbol,
+          limit: limit
+        });
+      }
+
+      // Fallback to direct request if CCXT mapping is missing
+      return await pub.request('allForceOrders', 'fapiPublic', 'GET', {
         symbol: formattedSymbol,
         limit: limit
       });
     } catch (e) {
-      console.warn(`[BinanceAdapter] getLiquidationOrders failed for ${symbol}: ${e.message}`);
+      if (!e.message.includes('4108') && !e.message.includes('out of maintenance')) {
+        console.warn(`[BinanceAdapter] getLiquidationOrders failed for ${symbol}: ${e.message}`);
+      }
       return [];
     }
   }

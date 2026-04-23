@@ -334,12 +334,12 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
       const pm = portfolioManagers.get(id);
       if (pm) {
         pm.config.minConfidence = parseFloat(minConfidence);
-        log.info(`[Fleet] Updated LIVE fleet ${id} minConfidence to ${minConfidence}%`);
+        console.info(`[Fleet] Updated LIVE fleet ${id} minConfidence to ${minConfidence}%`);
       }
 
       res.json({ success: true, message: 'Settings updated' });
     } catch (error) {
-      log.error(`[Fleet Update Error] ${error.message}`);
+      console.error(`[Fleet Update Error] ${error.message}`);
       res.status(500).json({ error: error.message });
     }
   });
