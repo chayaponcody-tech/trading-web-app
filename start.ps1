@@ -1,129 +1,209 @@
-# start.ps1 — Start all services (Node.js + Python strategy-ai + Polymarket)
-# Usage: .\start.ps1
+# start.ps1 — Manage grouped services with start/stop/restart/status
+# Usage examples:
+#   .\start.ps1 start all
+#   .\start.ps1 start core
+#   .\start.ps1 stop ai
+#   .\start.ps1 status polymarket
 
+param(
+    [ValidateSet("start", "stop", "restart", "status")]
+    [string]$Action = "start",
+    [ValidateSet("all", "core", "ai", "polymarket")]
+    [string]$Group = "all"
+)
+
+$ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
+$stateDir = Join-Path $root ".runtime"
+$stateFile = Join-Path $stateDir "start-state.json"
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 
-function Get-PortOwners {
-    param([int]$Port)
-
-    $listeners = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
-    if (-not $listeners) { return @() }
-
-    $owners = foreach ($listener in $listeners) {
-        $proc = Get-Process -Id $listener.OwningProcess -ErrorAction SilentlyContinue
-        [PSCustomObject]@{
-            Port = $Port
-            PID = $listener.OwningProcess
-            ProcessName = if ($proc) { $proc.ProcessName } else { "Unknown" }
-        }
+$services = @(
+    @{
+        Name = "core"
+        Display = "API Gateway + Frontend"
+        Ports = @(4000, 4001)
+        Ready = @("http://localhost:4001/api-docs", "http://localhost:4000")
+        FilePath = "cmd.exe"
+        Args = @("/c", "npm run start")
+    },
+    @{
+        Name = "strategy-ai"
+        Display = "Strategy AI"
+        Ports = @(8000)
+        Ready = @("http://localhost:8000/health")
+        FilePath = "powershell.exe"
+        Args = @("-ExecutionPolicy", "Bypass", "-File", ".\scripts\run-strategy-ai.ps1")
+    },
+    @{
+        Name = "quant-engine"
+        Display = "Quant Engine"
+        Ports = @(8002)
+        Ready = @("http://localhost:8002/docs")
+        FilePath = "powershell.exe"
+        Args = @("-ExecutionPolicy", "Bypass", "-File", ".\scripts\run-quant-engine.ps1")
+    },
+    @{
+        Name = "polymarket-dashboard"
+        Display = "Polymarket Dashboard"
+        Ports = @(8080)
+        Ready = @("http://localhost:8080/api/system_status")
+        FilePath = "powershell.exe"
+        Args = @("-ExecutionPolicy", "Bypass", "-File", ".\scripts\run-polymarket-dashboard.ps1")
+    },
+    @{
+        Name = "polymarket-agent"
+        Display = "Polymarket Agent"
+        Ports = @()
+        Ready = @()
+        FilePath = "powershell.exe"
+        Args = @("-ExecutionPolicy", "Bypass", "-File", ".\scripts\run-polymarket-agent.ps1")
     }
+)
 
-    return $owners | Sort-Object PID -Unique
+$groups = @{
+    core = @("core")
+    ai = @("strategy-ai", "quant-engine")
+    polymarket = @("polymarket-dashboard", "polymarket-agent")
+    all = @("core", "strategy-ai", "quant-engine", "polymarket-dashboard", "polymarket-agent")
 }
 
-function Wait-HttpReady {
-    param(
-        [string]$Url,
-        [string]$Name,
-        [int]$TimeoutSeconds = 30
-    )
+function Ensure-StateDir {
+    if (-not (Test-Path $stateDir)) {
+        New-Item -ItemType Directory -Path $stateDir | Out-Null
+    }
+}
 
+function Load-State {
+    if (-not (Test-Path $stateFile)) { return @{} }
+    try {
+        $raw = Get-Content -Path $stateFile -Raw | ConvertFrom-Json -AsHashtable
+        if ($null -eq $raw) { return @{} }
+        return $raw
+    } catch {
+        return @{}
+    }
+}
+
+function Save-State([hashtable]$state) {
+    Ensure-StateDir
+    ($state | ConvertTo-Json -Depth 5) | Set-Content -Path $stateFile -Encoding UTF8
+}
+
+function Get-PortOwners([int[]]$Ports) {
+    if (-not $Ports -or $Ports.Count -eq 0) { return @() }
+    $listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $Ports -contains $_.LocalPort }
+    if (-not $listeners) { return @() }
+    $listeners | Select-Object LocalPort, OwningProcess -Unique
+}
+
+function Wait-HttpReady([string]$Url, [string]$Name, [int]$TimeoutSeconds = 30) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         try {
             $response = & curl.exe --silent --show-error --output NUL --write-out "%{http_code}" --max-time 2 $Url
             if ($LASTEXITCODE -eq 0 -and [int]$response -ge 200 -and [int]$response -lt 500) {
                 Write-Host "  [OK] $Name ready at $Url" -ForegroundColor Green
-                return $true
+                return
             }
-        } catch {
-            Start-Sleep -Milliseconds 500
+        } catch {}
+        Start-Sleep -Milliseconds 500
+    }
+    Write-Host "  [WARN] $Name not ready within ${TimeoutSeconds}s ($Url)" -ForegroundColor Yellow
+}
+
+function Start-ServiceGroup([string[]]$names) {
+    $state = Load-State
+    $selected = $services | Where-Object { $names -contains $_.Name }
+    $ports = @($selected | ForEach-Object { $_.Ports } | Select-Object -Unique)
+    $busy = Get-PortOwners -Ports $ports
+    if ($busy.Count -gt 0) {
+        Write-Host "Cannot start. Required ports are in use:" -ForegroundColor Red
+        foreach ($entry in $busy) {
+            $proc = Get-Process -Id $entry.OwningProcess -ErrorAction SilentlyContinue
+            $name = if ($proc) { $proc.ProcessName } else { "Unknown" }
+            Write-Host "  Port $($entry.LocalPort): PID $($entry.OwningProcess) ($name)" -ForegroundColor Yellow
+        }
+        exit 1
+    }
+
+    foreach ($svc in $selected) {
+        Write-Host "Starting $($svc.Display)..." -ForegroundColor Cyan
+        $proc = Start-Process -FilePath $svc.FilePath `
+            -ArgumentList $svc.Args `
+            -WorkingDirectory $root `
+            -PassThru -WindowStyle Hidden
+        $state[$svc.Name] = @{
+            pid = $proc.Id
+            startedAt = (Get-Date).ToString("o")
         }
     }
 
-    Write-Host "  [WARN] $Name did not become ready within ${TimeoutSeconds}s ($Url)" -ForegroundColor Yellow
-    return $false
-}
-
-$requiredPorts = @(4000, 4001, 8000, 8002, 8080)
-$busyPorts = foreach ($port in $requiredPorts) { Get-PortOwners -Port $port }
-if ($busyPorts.Count -gt 0) {
-    Write-Host "Cannot start services because required ports are already in use:" -ForegroundColor Red
-    $busyPorts | ForEach-Object {
-        Write-Host ("  Port {0}: PID {1} ({2})" -f $_.Port, $_.PID, $_.ProcessName) -ForegroundColor Yellow
+    Save-State -state $state
+    foreach ($svc in $selected) {
+        foreach ($url in $svc.Ready) {
+            Wait-HttpReady -Url $url -Name $svc.Display
+        }
     }
-    Write-Host "Stop the listed processes or free those ports, then run .\\start.ps1 again." -ForegroundColor Yellow
-    exit 1
 }
 
-$env:PYTHONUTF8 = "1"
-$env:PYTHONIOENCODING = "utf-8"
+function Stop-ServiceGroup([string[]]$names) {
+    $state = Load-State
+    $selected = $services | Where-Object { $names -contains $_.Name }
 
-Write-Host "Starting strategy-ai (Python)..." -ForegroundColor Cyan
-$pythonExe = "$root\packages\strategy-ai\venv\Scripts\python.exe"
-if (-not (Test-Path $pythonExe)) {
-    $pythonExe = "python"
-    Write-Host "  [WARN] venv not found, using system python" -ForegroundColor Yellow
-}
-$python = Start-Process -FilePath $pythonExe `
-    -ArgumentList "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload" `
-    -WorkingDirectory "$root\packages\strategy-ai" `
-    -PassThru -NoNewWindow
-
-Write-Host "Starting quant-engine (Python)..." -ForegroundColor Cyan
-$quant = Start-Process -FilePath $pythonExe `
-    -ArgumentList "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8002", "--reload" `
-    -WorkingDirectory "$root\packages\quant-engine" `
-    -PassThru -NoNewWindow
-
-Write-Host "Starting Polymarket Agent (Python)..." -ForegroundColor Cyan
-$polyPythonExe = "$root\polymarket\polymarket_agent\.venv\Scripts\python.exe"
-if (-not (Test-Path $polyPythonExe)) {
-    $polyPythonExe = "python"
-    Write-Host "  [WARN] Polymarket venv not found, using system python" -ForegroundColor Yellow
-}
-# Start Polymarket Agent in dry-run mode by default
-$polyAgent = Start-Process -FilePath $polyPythonExe `
-    -ArgumentList "main.py", "--dry-run" `
-    -WorkingDirectory "$root\polymarket\polymarket_agent" `
-    -PassThru -NoNewWindow
-
-Write-Host "Starting Polymarket Dashboard (Python)..." -ForegroundColor Cyan
-$polyDashboard = Start-Process -FilePath $polyPythonExe `
-    -ArgumentList "apps\api-gateway\api_server.py" `
-    -WorkingDirectory "$root\polymarket\polymarket_agent" `
-    -PassThru -NoNewWindow
-
-Wait-HttpReady -Url "http://localhost:8000/health" -Name "Strategy AI" -TimeoutSeconds 45 | Out-Null
-Wait-HttpReady -Url "http://localhost:8002/docs" -Name "Quant Engine" -TimeoutSeconds 30 | Out-Null
-Wait-HttpReady -Url "http://localhost:8080/api/system_status" -Name "Polymarket Dashboard" -TimeoutSeconds 30 | Out-Null
-
-Write-Host "Starting API Gateway + Vite (Node.js)..." -ForegroundColor Cyan
-$node = Start-Process -FilePath "cmd.exe" `
-    -ArgumentList "/c", "npm run start" `
-    -WorkingDirectory "$root" `
-    -PassThru -NoNewWindow
-
-Write-Host ""
-Write-Host "All services started:" -ForegroundColor Green
-Write-Host "  Frontend             : http://localhost:4000" -ForegroundColor White
-Write-Host "  API Gateway          : http://localhost:4001" -ForegroundColor White
-Write-Host "  Strategy AI          : http://localhost:8000" -ForegroundColor White
-Write-Host "  Polymarket Dashboard : http://localhost:8080" -ForegroundColor White
-Write-Host ""
-Write-Host "Press Ctrl+C to stop all services..." -ForegroundColor Yellow
-
-try {
-    if ($node -and $node.Id) {
-        Wait-Process -Id $node.Id
-    } else {
-        while ($true) { Start-Sleep -Seconds 5 }
+    foreach ($svc in $selected) {
+        if ($state.ContainsKey($svc.Name)) {
+            $procId = $state[$svc.Name].pid
+            if ($procId) {
+                Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+                Write-Host "Stopped $($svc.Display) PID $procId" -ForegroundColor Yellow
+            }
+            $state.Remove($svc.Name) | Out-Null
+        }
     }
-} finally {
-    Write-Host "Stopping services..." -ForegroundColor Red
-    if ($python -and $python.Id)               { Stop-Process -Id $python.Id -ErrorAction SilentlyContinue }
-    if ($quant -and $quant.Id)                 { Stop-Process -Id $quant.Id   -ErrorAction SilentlyContinue }
-    if ($node -and $node.Id)                   { Stop-Process -Id $node.Id   -ErrorAction SilentlyContinue }
-    if ($polyAgent -and $polyAgent.Id)         { Stop-Process -Id $polyAgent.Id -ErrorAction SilentlyContinue }
-    if ($polyDashboard -and $polyDashboard.Id) { Stop-Process -Id $polyDashboard.Id -ErrorAction SilentlyContinue }
+
+    $ports = @($selected | ForEach-Object { $_.Ports } | Select-Object -Unique)
+    $owners = Get-PortOwners -Ports $ports
+    foreach ($entry in $owners) {
+        Stop-Process -Id $entry.OwningProcess -Force -ErrorAction SilentlyContinue
+        Write-Host "Killed PID $($entry.OwningProcess) on port $($entry.LocalPort)" -ForegroundColor Yellow
+    }
+
+    Save-State -state $state
+}
+
+function Show-Status([string[]]$names) {
+    $state = Load-State
+    $selected = $services | Where-Object { $names -contains $_.Name }
+    foreach ($svc in $selected) {
+        $procId = $null
+        if ($state.ContainsKey($svc.Name)) { $procId = $state[$svc.Name].pid }
+        $proc = if ($procId) { Get-Process -Id $procId -ErrorAction SilentlyContinue } else { $null }
+        $status = if ($proc) { "running (PID $procId)" } else { "stopped" }
+        Write-Host ("{0,-24} {1}" -f $svc.Display, $status) -ForegroundColor White
+    }
+}
+
+$targetServices = $groups[$Group]
+
+switch ($Action) {
+    "start" {
+        Start-ServiceGroup -names $targetServices
+        Write-Host "Started group '$Group'." -ForegroundColor Green
+    }
+    "stop" {
+        Stop-ServiceGroup -names $targetServices
+        Write-Host "Stopped group '$Group'." -ForegroundColor Green
+    }
+    "restart" {
+        Stop-ServiceGroup -names $targetServices
+        Start-Sleep -Seconds 1
+        Start-ServiceGroup -names $targetServices
+        Write-Host "Restarted group '$Group'." -ForegroundColor Green
+    }
+    "status" {
+        Show-Status -names $targetServices
+    }
 }
