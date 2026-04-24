@@ -105,8 +105,18 @@ class ConfidenceEngine:
         highs: list[float] = None,
         lows: list[float] = None,
     ) -> tuple[float, str]:
-        """Returns (confidence: float, reason: str) clamped to [0.0, 1.0]"""
-        # Delegate to ML model when loaded
+        """
+        AI Committee Implementation:
+        Aggregates insights from multiple virtual agents (Personas).
+        """
+        if signal == "NONE":
+            return 0.0, "No signal"
+
+        # 1. Base Quantitative Score (The "Quant Agent")
+        base_conf, base_reason = self._rule_based(signal, features, regime)
+
+        # 2. ML Validation (The "ML Agent")
+        ml_conf = None
         if self.model is not None and closes is not None and len(closes) >= 50:
             try:
                 feat_vec = self.pipeline.extract(
@@ -115,19 +125,79 @@ class ConfidenceEngine:
                     lows if lows is not None else closes,
                 )
                 ml_conf = self._ml_score(feat_vec)
-                return round(max(0.0, min(1.0, ml_conf)), 4), "[ML] predict_proba"
             except Exception as e:
-                logger.error(f"[ConfidenceEngine] ML scoring failed, falling back to rule-based: {e}")
+                logger.error(f"[AI-Committee] ML Agent failed: {e}")
 
-        confidence, reason = self._rule_based(signal, features, regime)
+        # 3. LLM Committee (The "AI Experts")
+        # Only invoke if mode is "full" OR if ML/Quant results are contradictory
+        llm_conf = None
+        llm_reason = ""
+        
+        should_invoke_llm = (self.mode == "full") or (ml_conf is not None and abs(ml_conf - base_conf) > 0.4)
+        
+        if should_invoke_llm and self.openrouter_key:
+            committee_results = self._llm_committee_vote(signal, features, regime, strategy_metadata)
+            llm_conf = committee_results["avg_confidence"]
+            llm_reason = committee_results["consensus_reason"]
 
-        if self.mode == "full" and 0.50 <= confidence <= 0.70:
-            if self.openrouter_key:
-                llm_conf, llm_reason = self._llm_analyze(signal, features, regime, strategy_metadata)
-                confidence = (confidence + llm_conf) / 2
-                reason = f"[ML+LLM] {llm_reason}"
+        # 4. Final Aggregation
+        # Weighting: Quant (30%), ML (30% if available), LLM (40% if available)
+        final_confidence = base_conf
+        final_reason = base_reason
 
-        return round(max(0.0, min(1.0, confidence)), 4), reason
+        if ml_conf is not None and llm_conf is not None:
+            final_confidence = (base_conf * 0.2) + (ml_conf * 0.3) + (llm_conf * 0.5)
+            final_reason = f"[Committee Consensus] {llm_reason} (ML:{ml_conf:.1%}, Quant:{base_conf:.1%})"
+        elif ml_conf is not None:
+            final_confidence = (base_conf * 0.5) + (ml_conf * 0.5)
+            final_reason = f"[Quant+ML] {base_reason} | ML Confirmation: {ml_conf:.1%}"
+        elif llm_conf is not None:
+            final_confidence = (base_conf * 0.4) + (llm_conf * 0.6)
+            final_reason = f"[Quant+AI] {llm_reason}"
+
+        return round(max(0.0, min(1.0, final_confidence)), 4), final_reason
+
+    def _llm_committee_vote(self, signal, features, regime, metadata) -> dict:
+        """
+        Simulates a committee of 3 AI personas to evaluate the trade.
+        """
+        symbol = metadata.get("name", "unknown")
+        
+        # We use a single multi-turn or multi-persona prompt to save on API calls/latency
+        prompt = f"""You are a Trading Committee evaluating a {signal} signal for {symbol}.
+Current Market: Regime={regime}, RSI={features.get('rsi',0):.1f}, Volatility={features.get('volatility',0):.4f}, Momentum={features.get('momentum',0):.4f}
+
+Provide analysis from 3 perspectives:
+1. TREND_FOLLOWER: Does the momentum support this?
+2. MEAN_REVERSION: Is it overextended?
+3. RISK_AUDITOR: What is the worst-case scenario?
+
+Reply with JSON only:
+{{
+  "trend_follower": {{"approved": bool, "confidence": 0-1, "thought": "..."}},
+  "mean_reversion": {{"approved": bool, "confidence": 0-1, "thought": "..."}},
+  "risk_auditor": {{"approved": bool, "confidence": 0-1, "thought": "..."}},
+  "consensus_reason": "Summary in Thai",
+  "avg_confidence": 0-1
+}}"""
+
+        try:
+            resp = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {self.openrouter_key}", "Content-Type": "application/json"},
+                json={
+                    "model": self.openrouter_model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "response_format": {"type": "json_object"},
+                },
+                timeout=12,
+            )
+            data = resp.json()["choices"][0]["message"]["content"]
+            result = json.loads(data)
+            return result
+        except Exception as e:
+            logger.error(f"[AI-Committee] Voting failed: {e}")
+            return {"avg_confidence": 0.5, "consensus_reason": "Committee Error: Fallback to base logic"}
 
     def _ml_score(self, features: np.ndarray) -> float:
         """Call model.predict_proba and return positive class probability."""
@@ -209,42 +279,3 @@ class ConfidenceEngine:
         score = max(0.0, min(1.0, score))
         reason_text = " | ".join(reasons) if reasons else f"confidence {score:.0%}"
         return score, reason_text
-
-    def _llm_analyze(
-        self,
-        signal: str,
-        features: dict,
-        regime: str,
-        strategy_metadata: dict,
-    ) -> tuple[float, str]:
-        """LLM-based analysis — moved verbatim from main.py llm_analyze(), symbol replaced by strategy_metadata"""
-        if not self.openrouter_key:
-            return 0.5, "LLM key missing"
-
-        symbol = strategy_metadata.get("name", "unknown")
-
-        prompt = f"""You are a quant trading risk manager. Analyze this signal:
-Symbol: {symbol}
-Signal: {signal}
-Regime: {regime}
-Features: RSI={features.get('rsi', 0):.1f}, BB_position={features.get('bb_position', 0):.2f}, EMA_cross={features.get('ema_cross', 0):.4f}, volatility={features.get('volatility', 0):.4f}, momentum={features.get('momentum', 0):.4f}
-
-Should we enter this trade? Reply with JSON only:
-{{"approved": true/false, "confidence": 0.0-1.0, "reason": "brief Thai reason"}}"""
-
-        try:
-            resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={"Authorization": f"Bearer {self.openrouter_key}", "Content-Type": "application/json"},
-                json={
-                    "model": self.openrouter_model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "response_format": {"type": "json_object"},
-                },
-                timeout=10,
-            )
-            content = resp.json()["choices"][0]["message"]["content"]
-            data = json.loads(content)
-            return float(data.get("confidence", 0.5)), data.get("reason", "LLM analyzed")
-        except Exception as e:
-            return 0.5, f"LLM error: {str(e)[:50]}"

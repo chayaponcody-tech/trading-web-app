@@ -1358,10 +1358,13 @@ export default function Portfolio({ mode = 'test' }: { mode?: 'test' | 'live' })
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.5rem', background: 'rgba(0,0,0,0.2)', padding: '1.5rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.02)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '1.5rem', background: 'rgba(0,0,0,0.2)', padding: '1.5rem', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.02)' }}>
                 <StatCard label="Fleet Net PnL" value={`${fleetPnl >= 0 ? '+' : ''}${fleetPnl.toFixed(2)}`} sub="Total USDT Profit" color={fleetPnl >= 0 ? '#0ecb81' : '#f6465d'} />
                 <div style={{ borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '1.5rem' }}>
-                    <StatCard label="Current Yield" value={`${pnlPct.toFixed(2)}%`} sub="Return on Allocation" color={pnlPct >= 0 ? '#0ecb81' : '#f6465d'} hideBorder />
+                    <StatCard label="Sortino Ratio" value={fleetAnalytics?.sortino?.toFixed(2) || '0.00'} sub="Downside Risk-Adj" color="#faad14" hideBorder />
+                </div>
+                <div style={{ borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '1.5rem' }}>
+                    <StatCard label="Value at Risk (VaR)" value={`$${fleetAnalytics?.var?.toFixed(1) || '0.0'}`} sub="95% Hist. Max Loss" color="#f6465d" hideBorder />
                 </div>
                 <div style={{ borderLeft: '1px solid rgba(255,255,255,0.05)', paddingLeft: '1.5rem' }}>
                     <StatCard label="Capital Employed" value={`$${(fleetBudget + fleetPnl).toLocaleString()}`} sub={`${((fleetBudget/totalEquity)*100).toFixed(1)}% of Master Wallet`} hideBorder />

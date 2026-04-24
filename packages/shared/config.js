@@ -39,6 +39,7 @@ export const DEFAULT_BINANCE_CONFIG = {
   strategyAiMode: 'off',
   strategyAiUrl: 'http://strategy-ai:8000',
   strategyAiConfidenceThreshold: 0.70,
+  tradeValidatorEnabled: true,
 };
 
 export const PORT = parseInt(process.env.PORT || '4001', 10);

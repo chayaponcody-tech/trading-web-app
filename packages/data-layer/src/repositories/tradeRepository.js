@@ -164,3 +164,33 @@ export function getRecentMistakes(symbol, limit = 5) {
   }
   return [];
 }
+
+import fs from 'fs';
+import path from 'path';
+
+/**
+ * Logs the AI's decision "thesis" to a human-readable Markdown file.
+ * Implementation of the "Stateless Memory" concept from references.
+ */
+export function logDecision(decision) {
+  try {
+    const dataDir = path.join(process.cwd(), 'data');
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    
+    const filePath = path.join(dataDir, 'DECISION_LOG.md');
+    const timestamp = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+    
+    const entry = `
+### [${timestamp}] ${decision.symbol} - ${decision.type}
+- **Strategy:** ${decision.strategy}
+- **Price:** ${decision.price}
+- **Regime:** ${decision.regime}
+- **Confidence:** ${(decision.confidence * 100).toFixed(1)}%
+- **Thesis:** ${decision.reason}
+---
+`;
+    fs.appendFileSync(filePath, entry, 'utf8');
+  } catch (e) {
+    console.error('[TradeRepo] logDecision error:', e.message);
+  }
+}

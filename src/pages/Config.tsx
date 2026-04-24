@@ -42,6 +42,7 @@ export default function ConfigPage() {
     hasKeys: false, hasOpenRouter: false, hasTelegram: false,
     strategyAiMode: 'off', strategyAiUrl: 'http://strategy-ai:8000',
     strategyAiConfidenceThreshold: 0.70,
+    tradeValidatorEnabled: true,
     liveApiKey: '', liveApiSecret: '', hasLiveKeys: false,
   });
   const [tempORKey, setTempORKey] = useState('');
@@ -139,6 +140,7 @@ export default function ConfigPage() {
         strategyAiMode: data.strategyAiMode || 'off',
         strategyAiUrl: data.strategyAiUrl || 'http://strategy-ai:8000',
         strategyAiConfidenceThreshold: data.strategyAiConfidenceThreshold ?? 0.70,
+        tradeValidatorEnabled: data.tradeValidatorEnabled !== false,
         liveApiKey: '', liveApiSecret: '', hasLiveKeys: data.hasLiveKeys || false,
       }));
     } catch {}
@@ -201,6 +203,7 @@ export default function ConfigPage() {
           telegramToken: tempTGToken || undefined, telegramChatId: cfg.telegramChatId,
           strategyAiMode: cfg.strategyAiMode, strategyAiUrl: cfg.strategyAiUrl,
           strategyAiConfidenceThreshold: cfg.strategyAiConfidenceThreshold,
+          tradeValidatorEnabled: cfg.tradeValidatorEnabled,
           liveApiKey: cfg.liveApiKey || undefined, liveApiSecret: cfg.liveApiSecret || undefined,
         }),
       });
@@ -495,6 +498,27 @@ export default function ConfigPage() {
               
               {/* Log Level Management */}
               <div>
+                <Field label="Hard Rules Gate">
+                  <button
+                    onClick={() => setCfg(k => ({ ...k, tradeValidatorEnabled: !k.tradeValidatorEnabled }))}
+                    style={{
+                      width: '100%',
+                      padding: '0.85rem 1rem',
+                      borderRadius: '8px',
+                      border: `1px solid ${cfg.tradeValidatorEnabled ? '#0ecb81' : '#f6465d'}`,
+                      background: cfg.tradeValidatorEnabled ? 'rgba(14,203,129,0.12)' : 'rgba(246,70,93,0.12)',
+                      color: cfg.tradeValidatorEnabled ? '#0ecb81' : '#f6465d',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {cfg.tradeValidatorEnabled ? 'Enabled: Hard Rules ON' : 'Disabled: Hard Rules OFF'}
+                  </button>
+                </Field>
+                <p style={{ fontSize: '0.75rem', color: '#777', margin: '0.6rem 0 1.2rem' }}>
+                  Controls the global pre-trade guard in `TradeValidator.js` for all bots.
+                </p>
+
                 <Field label="Real-time Log Level (DevOps)">
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                     {['DEBUG', 'INFO', 'WARNING', 'ERROR'].map(lvl => (

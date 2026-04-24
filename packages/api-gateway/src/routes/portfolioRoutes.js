@@ -88,11 +88,14 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
         .map(b => b.id);
 
       const { getAllTradesByFleet } = await import('../../../data-layer/src/repositories/tradeRepository.js');
-      const { calculateSharpe, calculateMaxDrawdown, calculateProfitFactor, generateEquityCurve } = await import('../../../shared/AnalyticsUtils.js');
+      const { 
+        calculateSharpe, calculateMaxDrawdown, calculateProfitFactor, generateEquityCurve,
+        calculateVaR, calculateSortino
+      } = await import('../../../shared/AnalyticsUtils.js');
 
       const trades = getAllTradesByFleet(id, botIds);
       if (!trades || trades.length === 0) {
-        return res.json({ sharpe: 0, maxDrawdown: 0, profitFactor: 0, equityCurve: [], totalTrades: 0, winRate: 0 });
+        return res.json({ sharpe: 0, maxDrawdown: 0, profitFactor: 0, var: 0, sortino: 0, equityCurve: [], totalTrades: 0, winRate: 0 });
       }
 
       const pnlList = trades.map(t => parseFloat(t.pnl || 0));
@@ -100,8 +103,10 @@ export function createPortfolioRoutes(portfolioManagers, { botManager, exchange 
 
       res.json({
         sharpe: calculateSharpe(pnlList),
+        sortino: calculateSortino(pnlList),
         maxDrawdown: calculateMaxDrawdown(equityCurve.map(e => e.value)),
         profitFactor: calculateProfitFactor(pnlList),
+        var: calculateVaR(pnlList),
         equityCurve,
         totalTrades: trades.length,
         winRate: (pnlList.filter(p => p > 0).length / trades.length) * 100

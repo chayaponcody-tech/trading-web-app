@@ -2,7 +2,8 @@
 export * from './repositories/botRepository.js';
 export { 
   getTradeMemory, appendTrade, getAllTradesFromBots, 
-  saveMistake, getRecentMistakes, updateTradeMemoryLesson 
+  saveMistake, getRecentMistakes, updateTradeMemoryLesson,
+  logDecision 
 } from './repositories/tradeRepository.js';
 export * from './repositories/fleetRepository.js';
 export * from './repositories/configRepository.js';

@@ -130,3 +130,33 @@ export function computeSignalConfidence(signal, closes) {
 
   return Math.max(0, Math.min(1, Math.round(score * 100) / 100));
 }
+
+/**
+ * Calculate Value at Risk (VaR)
+ * 95% Confidence Level Historical VaR. Returns absolute USDT value.
+ * @param {number[]} pnlList - Array of PnL values
+ */
+export function calculateVaR(pnlList) {
+  if (!pnlList || pnlList.length < 10) return 0;
+  const sorted = [...pnlList].sort((a, b) => a - b);
+  // 5th percentile for 95% confidence
+  const index = Math.floor(sorted.length * 0.05);
+  return Math.abs(sorted[index]);
+}
+
+/**
+ * Calculate Sortino Ratio
+ * Penalizes only downside volatility.
+ * @param {number[]} pnlList
+ */
+export function calculateSortino(pnlList) {
+  if (!pnlList || pnlList.length < 2) return 0;
+  const mean = pnlList.reduce((a, b) => a + b, 0) / pnlList.length;
+  const downsidePnLs = pnlList.filter(p => p < 0);
+  if (downsidePnLs.length < 1) return mean > 0 ? 100 : 0; 
+  
+  const downsideVariance = downsidePnLs.map(x => Math.pow(x, 2)).reduce((a, b) => a + b, 0) / pnlList.length;
+  const downsideStdDev = Math.sqrt(downsideVariance);
+  
+  return downsideStdDev === 0 ? 0 : (mean / downsideStdDev) * Math.sqrt(365);
+}

@@ -1,4 +1,4 @@
-import { computeSignal, generateEntryReason, generateDiagnostic } from './SignalEngine.js';
+﻿import { computeSignal, generateEntryReason, generateDiagnostic } from './SignalEngine.js';
 import { getPythonSignal } from './PythonStrategyClient.js';
 import { applySlippage, computePositionSize, computeTPSL } from './Backtester.js';
 import { emaCalc, computeATR } from '../../shared/indicators.js';
@@ -12,6 +12,8 @@ import { saveMistake, getRecentMistakes, updateTradeMemoryLesson } from '../../d
 import { TZ_OPTS } from '../../shared/config.js';
 import { TuningService } from './TuningService.js';
 import { CircuitBreaker } from './CircuitBreaker.js';
+import { TradeValidator } from './TradeValidator.js';
+import { logDecision } from '../../data-layer/src/index.js';
 
 // ─── Bot Manager ──────────────────────────────────────────────────────────────
 // Manages bot lifecycle and orchestrates the tick loop.
@@ -37,6 +39,7 @@ export class BotManager {
     this.tickCount = 0;
     this.notificationService = null;
     this.circuitBreaker = new CircuitBreaker('Binance-API', { threshold: 10, resetTimeout: 60000 });
+    this.tradeValidator = new TradeValidator(this);
   }
 
   // ─── Dependency Injection ────────────────────────────────────────────────────
@@ -474,7 +477,18 @@ export class BotManager {
                 bot._pendingPythonStoploss = aiResult.stoploss;
                 bot._pendingAtrValue = aiResult.atrValue;
                 bot._pendingRegime   = aiResult.regime;
-                await this._openPosition(bot, signal, currPrice, closes);
+
+                // Apply Hard Rules (TradeValidator)
+                const validation = this.tradeValidator.validate(bot, signal, currPrice);
+                if (!validation.approved) {
+                  bot.currentThought = `🛡️ [Hard Rule Block] ${validation.reason}`;
+                  bot.lastEntryReason = `[BLOCKED] ${validation.reason}`;
+                  bot.lastThoughtAt = new Date().toISOString();
+                  console.log(`[Bot ${botId}] Entry blocked by Hard Rules: ${validation.reason}`);
+                } else {
+                  await this._openPosition(bot, signal, currPrice, closes); logDecision({ symbol: bot.config.symbol, type: signal, strategy: bot.config.strategy, price: currPrice, regime: (typeof aiResult !== 'undefined' ? aiResult.regime : 'N/A'), confidence: (typeof aiResult !== 'undefined' ? aiResult.confidence : 1.0), reason: (typeof aiResult !== 'undefined' ? aiResult.reason : 'Manual Entry') });
+                }
+
                 if (bot.openPositions.length > 0) {
                   const pos    = bot.openPositions.at(-1);
                   const atr    = bot._pendingAtrValue ?? null;
@@ -522,7 +536,16 @@ export class BotManager {
                 bot.lastEntryReason = `[BLOCKED] ${microOk.reason}`;
                 bot.lastThoughtAt = new Date().toISOString();
               } else {
-                await this._openPosition(bot, signal, currPrice, closes);
+                // Apply Hard Rules (TradeValidator)
+                const validation = this.tradeValidator.validate(bot, signal, currPrice);
+                if (!validation.approved) {
+                  bot.currentThought = `🛡️ [Hard Rule Block] ${validation.reason}`;
+                  bot.lastEntryReason = `[BLOCKED] ${validation.reason}`;
+                  bot.lastThoughtAt = new Date().toISOString();
+                  console.log(`[Bot ${botId}] Entry blocked by Hard Rules: ${validation.reason}`);
+                } else {
+                  await this._openPosition(bot, signal, currPrice, closes); logDecision({ symbol: bot.config.symbol, type: signal, strategy: bot.config.strategy, price: currPrice, regime: (typeof aiResult !== 'undefined' ? aiResult.regime : 'N/A'), confidence: (typeof aiResult !== 'undefined' ? aiResult.confidence : 1.0), reason: (typeof aiResult !== 'undefined' ? aiResult.reason : 'Manual Entry') });
+                }
               }
             }
           } else {
@@ -1408,5 +1431,6 @@ export class BotManager {
     }
   }
 }
+
 
 

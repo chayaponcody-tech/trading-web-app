@@ -7,12 +7,12 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --strictPort --port 4000 --host 0.0.0.0",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "test": "vitest --run",
-    "start": "concurrently --delay 2000 --kill-others-on-fail \"node --watch packages/api-gateway/src/server.js\" \"vite\"",
+    "start": "concurrently --delay 2000 --kill-others-on-fail \"node --watch packages/api-gateway/src/server.js\" \"vite --strictPort --port 4000 --host 0.0.0.0\"",
     "start:pm2": "pm2 start ecosystem.config.cjs --update-env",
     "restart:pm2": "pm2 restart ecosystem.config.cjs --update-env",
     "stop:pm2": "pm2 stop ecosystem.config.cjs",

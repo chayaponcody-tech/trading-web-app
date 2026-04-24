@@ -18,6 +18,7 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
       strategyAiMode: cfg.strategyAiMode || 'off',
       strategyAiUrl: cfg.strategyAiUrl || 'http://strategy-ai:8000',
       strategyAiConfidenceThreshold: cfg.strategyAiConfidenceThreshold ?? 0.70,
+      tradeValidatorEnabled: cfg.tradeValidatorEnabled !== false,
       // Live keys status
       liveApiKey: cfg.liveApiKey ? '****' + cfg.liveApiKey.slice(-4) : '',
       hasLiveKeys: !!(cfg.liveApiKey && cfg.liveApiSecret),
@@ -27,8 +28,8 @@ export function createConfigRoutes(botManager, portfolioManagers = new Map()) {
 
   r.post('/', async (req, res, next) => {
     try {
-      const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, liveApiKey, liveApiSecret, virtualTestBalance } = req.body;
-      patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, liveApiKey, liveApiSecret, virtualTestBalance });
+      const { apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, tradeValidatorEnabled, liveApiKey, liveApiSecret, virtualTestBalance } = req.body;
+      patchBinanceConfig({ apiKey, apiSecret, openRouterKey, openRouterModel, telegramToken, telegramChatId, strategyAiMode, strategyAiUrl, strategyAiConfidenceThreshold, tradeValidatorEnabled, liveApiKey, liveApiSecret, virtualTestBalance });
 
       const updated = loadBinanceConfig();
 

@@ -3,7 +3,8 @@ import { recommendBot, proposeFleet, analyzeMistakes, analyzeFleet, callOpenRout
 import { BinanceAdapter } from '../../../exchange-connector/src/BinanceAdapter.js';
 import { loadBinanceConfig } from '../../../data-layer/src/repositories/configRepository.js';
 import { getTradeMemory, getAllTradesFromBots } from '../../../data-layer/src/repositories/tradeRepository.js';
-
+import fs from 'fs';
+import path from 'path';
 // ─── AI Routes ────────────────────────────────────────────────────────────────
 export function createAiRoutes(botManager, binanceConfig) {
   const r = Router();
@@ -98,6 +99,22 @@ export function createAiRoutes(botManager, binanceConfig) {
       const result = await getOptimizedParams(bot, cfg.openRouterKey, cfg.openRouterModel);
       res.json(result);
     } catch (e) { next(e); }
+  });
+
+  // Read AI Decision Logs (Markdown)
+  r.get('/decision-logs', (req, res) => {
+    try {
+      const logPath = path.join(process.cwd(), 'data', 'DECISION_LOG.md');
+      
+      if (!fs.existsSync(logPath)) {
+        return res.json({ content: 'No decision logs yet.' });
+      }
+      
+      const content = fs.readFileSync(logPath, 'utf8');
+      res.json({ content });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   return r;
